@@ -1,0 +1,33 @@
+# ═══════════════════════════════════════════════════════════════════
+#  DARIA Pomodoro Timer v1.0.0
+#  Техника Помодоро с Дарьей
+# ═══════════════════════════════════════════════════════════════════
+
+id: pomodoro
+name: Помодоро
+description: |
+  Таймер для техники Помодоро. Работай продуктивно с 
+  перерывами и мотивацией от Дарьи! 🍅
+version: 1.0.0
+author: DARIA Team
+license: MIT
+
+icon: 🍅
+category: productivity
+
+has_desktop_icon: true
+desktop_icon: 🍅
+desktop_title: Помодоро
+
+has_window: true
+window_title: Помодоро Таймер
+window_size:
+  width: 350
+  height: 400
+window_template: window.html
+
+entry_point: main.py
+main_class: PomodoroPlugin
+
+capabilities:
+  - notifications

@@ -1,0 +1,38 @@
+# ═══════════════════════════════════════════════════════════════════
+#  DARIA Server Mode Plugin v1.0.0
+#  Многопользовательский режим с аккаунтами
+# ═══════════════════════════════════════════════════════════════════
+
+id: server-mode
+name: Server Mode
+description: |
+  Превращает DARIA в многопользовательский сервер!
+  - Учётные записи пользователей
+  - Личные файлы и настройки
+  - Изолированная память для каждого
+  - Доступ по сети и из интернета
+version: 1.0.0
+author: DARIA Team
+license: MIT
+
+icon: 🖥️
+category: system
+
+has_desktop_icon: true
+desktop_icon: 🖥️
+desktop_title: Server Mode
+
+has_window: true
+window_title: Server Mode
+window_size:
+  width: 450
+  height: 500
+window_template: window.html
+
+entry_point: main.py
+main_class: ServerModePlugin
+
+capabilities:
+  - network
+  - file_system
+  - memory_access

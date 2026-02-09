@@ -1,0 +1,94 @@
+# ═══════════════════════════════════════════════════════════════════
+#  🌸 DARIA Plugins Catalog
+#  Official plugin repository
+#  https://github.com/dariumi/Daria-Plugins
+# ═══════════════════════════════════════════════════════════════════
+
+version: 1.0.0
+updated: 2024-01-15
+
+plugins:
+  # ─── Communication ─────────────────────────────────────────────
+  - id: voice-call
+    name: Голосовой звонок
+    description: Голосовое общение с Дарьей через WebRTC. Говори с ней как по телефону!
+    version: 1.0.0
+    author: DARIA Team
+    icon: 📞
+    category: communication
+    download_url: https://github.com/dariumi/Daria-Plugins/releases/download/v1.0.0/voice-call.zip
+    homepage: https://github.com/dariumi/Daria-Plugins
+    preview_image: https://raw.githubusercontent.com/dariumi/Daria-Plugins/main/previews/voice-call.png
+    
+  - id: telegram-bot
+    name: Telegram Бот
+    description: Общайся с Дарьей через Telegram! Все сообщения синхронизируются.
+    version: 1.0.0
+    author: DARIA Team
+    icon: 🤖
+    category: communication
+    python_dependencies:
+      - python-telegram-bot>=20.7
+    download_url: https://github.com/dariumi/Daria-Plugins/releases/download/v1.0.0/telegram-bot.zip
+    homepage: https://github.com/dariumi/Daria-Plugins
+    
+  # ─── Productivity ──────────────────────────────────────────────
+  - id: notes
+    name: Заметки
+    description: Создавай и храни личные заметки. Поддержка тегов и поиска.
+    version: 1.0.0
+    author: DARIA Team
+    icon: 📝
+    category: productivity
+    download_url: https://github.com/dariumi/Daria-Plugins/releases/download/v1.0.0/notes.zip
+    
+  - id: pomodoro
+    name: Помодоро
+    description: Таймер для техники Помодоро. Работай продуктивно с мотивацией от Дарьи!
+    version: 1.0.0
+    author: DARIA Team
+    icon: 🍅
+    category: productivity
+    download_url: https://github.com/dariumi/Daria-Plugins/releases/download/v1.0.0/pomodoro.zip
+    
+  # ─── Utilities ─────────────────────────────────────────────────
+  - id: weather
+    name: Погода
+    description: Узнай погоду в своём городе с милыми комментариями от Дарьи!
+    version: 1.0.0
+    author: DARIA Team
+    icon: 🌤️
+    category: utilities
+    python_dependencies:
+      - requests>=2.31.0
+    download_url: https://github.com/dariumi/Daria-Plugins/releases/download/v1.0.0/weather.zip
+
+# ═══════════════════════════════════════════════════════════════════
+#  Categories
+# ═══════════════════════════════════════════════════════════════════
+
+categories:
+  - id: communication
+    name: Общение
+    icon: 💬
+    description: Плагины для общения с Дарьей
+    
+  - id: productivity
+    name: Продуктивность
+    icon: 📊
+    description: Инструменты для работы и учёбы
+    
+  - id: utilities
+    name: Утилиты
+    icon: 🔧
+    description: Полезные инструменты
+    
+  - id: creative
+    name: Творчество
+    icon: 🎨
+    description: Для креативных задач
+    
+  - id: entertainment
+    name: Развлечения
+    icon: 🎮
+    description: Игры и развлечения

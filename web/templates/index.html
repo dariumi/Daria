@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>DARIA v{{ version }}</title>
+    <link rel="stylesheet" href="/static/css/desktop.css">
+</head>
+<body>
+    <div id="desktop">
+        <div id="desktop-icons"></div>
+        <div id="windows-container"></div>
+        <div id="daria-avatar" title="Быстрый чат">
+            <div class="avatar-image">🌸</div>
+            <div class="avatar-status online"></div>
+        </div>
+        <div id="quick-chat" class="hidden">
+            <div class="quick-chat-header"><span>💬 Чат</span><button onclick="toggleQuickChat()">×</button></div>
+            <div class="quick-chat-messages" id="quick-messages"></div>
+            <div class="quick-chat-input">
+                <input type="text" id="quick-input" placeholder="Сообщение..." onkeypress="if(event.key==='Enter')sendQuickMessage()">
+                <button onclick="sendQuickMessage()">➤</button>
+            </div>
+        </div>
+        <div id="notifications-container"></div>
+    </div>
+
+    <div id="taskbar">
+        <button id="start-button" onclick="toggleStartMenu()"><span>🌸</span><span>DARIA</span></button>
+        <div id="taskbar-windows"></div>
+        <div id="taskbar-right">
+            <div id="attention-toggle" onclick="toggleAttention()" title="Внимание">💕</div>
+            <div id="status-indicator" class="offline">●</div>
+            <div id="clock"></div>
+        </div>
+    </div>
+
+    <div id="start-menu" class="hidden">
+        <div class="start-header"><div class="start-avatar">🌸</div><div><div class="start-name">Дарья</div><div class="start-version">v{{ version }}</div></div></div>
+        <div class="start-items">
+            <div class="start-item" onclick="openWindow('chat');toggleStartMenu()"><span>💬</span>Чат</div>
+            <div class="start-item" onclick="openWindow('files');toggleStartMenu()"><span>📁</span>Файлы</div>
+            <div class="start-item" onclick="openWindow('terminal');toggleStartMenu()"><span>💻</span>Терминал</div>
+            <div class="start-item" onclick="openWindow('store');toggleStartMenu()"><span>🛒</span>Магазин</div>
+            <div class="start-item" onclick="openWindow('settings');toggleStartMenu()"><span>⚙️</span>Настройки</div>
+            <div class="start-item" onclick="openWindow('support');toggleStartMenu()"><span>☕</span>Поддержать</div>
+            <div class="start-item" onclick="openWindow('about');toggleStartMenu()"><span>💕</span>О Дарье</div>
+        </div>
+    </div>
+
+    <div id="welcome-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header"><h2>🌸 Привет!</h2></div>
+            <div class="modal-body">
+                <p>Я Дарья, твоя виртуальная подруга!</p>
+                <p>Как тебя зовут?</p>
+                <input type="text" id="welcome-name" placeholder="Твоё имя..." onkeypress="if(event.key==='Enter')closeWelcome()">
+                <div class="gender-select">
+                    <label><input type="radio" name="gender" value="male"> 👨 Парень</label>
+                    <label><input type="radio" name="gender" value="female"> 👩 Девушка</label>
+                </div>
+            </div>
+            <div class="modal-footer"><button class="btn-primary" onclick="closeWelcome()">Начать! 💕</button></div>
+        </div>
+    </div>
+
+    <template id="window-template">
+        <div class="window">
+            <div class="window-header">
+                <div class="window-title"><span class="window-icon"></span><span class="window-name"></span></div>
+                <div class="window-controls">
+                    <button class="win-btn minimize">−</button>
+                    <button class="win-btn maximize">□</button>
+                    <button class="win-btn close">×</button>
+                </div>
+            </div>
+            <div class="window-content"></div>
+            <div class="window-resize-handle"></div>
+        </div>
+    </template>
+
+    <template id="chat-content">
+        <div class="chat-container">
+            <div class="chat-sidebar">
+                <button class="new-chat-btn" onclick="newChat()">+ Новый чат</button>
+                <div class="chat-history" id="chat-history"></div>
+            </div>
+            <div class="chat-main">
+                <div class="chat-messages" id="chat-messages"></div>
+                <div class="chat-typing hidden" id="chat-typing">Дарья печатает<span class="dots">...</span></div>
+                <div class="chat-input-area">
+                    <input type="text" id="chat-input" placeholder="Напиши сообщение..." onkeypress="if(event.key==='Enter')sendChatMessage()">
+                    <button onclick="sendChatMessage()">➤</button>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="files-content">
+        <div class="files-container">
+            <div class="files-toolbar">
+                <span id="files-path">/</span>
+                <button onclick="loadFiles(state.currentPath)">🔄</button>
+                <button onclick="createNewFile()">📄</button>
+                <button onclick="createNewFolder()">📁</button>
+                <label class="upload-btn">⬆️<input type="file" onchange="uploadFile(this)" hidden></label>
+            </div>
+            <div class="files-list" id="files-list"></div>
+            <div id="file-editor" class="file-editor hidden">
+                <div class="editor-header">
+                    <input type="text" id="file-editor-path" readonly>
+                    <button onclick="saveFile()">💾</button>
+                    <button onclick="closeEditor()">✖</button>
+                </div>
+                <textarea id="file-editor-content"></textarea>
+            </div>
+        </div>
+    </template>
+
+    <template id="terminal-content">
+        <div class="terminal-container">
+            <div class="terminal-output" id="terminal-output">
+                <div class="term-line">DARIA Terminal v0.7.0</div>
+                <div class="term-line">Введи help для команд</div>
+            </div>
+            <div class="terminal-input"><span>$</span><input type="text" id="terminal-input" onkeypress="if(event.key==='Enter')executeTerminal()"></div>
+        </div>
+    </template>
+
+    <template id="browser-content">
+        <div class="browser-container">
+            <div class="browser-toolbar">
+                <button onclick="browserBack()">←</button>
+                <button onclick="browserForward()">→</button>
+                <input type="text" id="browser-url" value="https://google.com" onkeypress="if(event.key==='Enter')browserGo()">
+                <button onclick="browserGo()">→</button>
+            </div>
+            <iframe id="browser-frame"></iframe>
+        </div>
+    </template>
+
+    <template id="player-content">
+        <div class="player-container">
+            <div class="player-cover">🎵</div>
+            <div class="player-title">Нет трека</div>
+            <div class="player-artist">Загрузи музыку</div>
+            <div class="player-progress"><div id="player-progress"></div></div>
+            <div class="player-time"><span id="player-current">0:00</span> / <span id="player-duration">0:00</span></div>
+            <div class="player-controls">
+                <button onclick="playerPrev()">⏮</button>
+                <button onclick="playerPlay()" id="player-play-btn">▶</button>
+                <button onclick="playerNext()">⏭</button>
+            </div>
+            <input type="range" class="volume-slider" value="80" onchange="playerVolume(this.value)">
+            <label class="upload-btn">🎵 Выбрать<input type="file" accept="audio/*" onchange="playerLoad(this.files)" hidden></label>
+            <audio id="player-audio"></audio>
+        </div>
+    </template>
+
+    <template id="logs-content">
+        <div class="logs-container">
+            <div class="logs-toolbar">
+                <select id="logs-filter" onchange="filterLogs()"><option value="all">Все</option><option value="INFO">INFO</option><option value="WARNING">WARN</option><option value="ERROR">ERROR</option></select>
+                <button onclick="refreshLogs()">🔄</button>
+                <label><input type="checkbox" id="logs-autoscroll" checked> Авто</label>
+            </div>
+            <div class="logs-output" id="logs-output"></div>
+        </div>
+    </template>
+
+    <template id="settings-content">
+        <div class="settings-container">
+            <div id="mood-indicator">
+                <span>😌</span>
+                <span>Загрузка...</span>
+            </div>
+            <div class="settings-section">
+                <h3>👤 Профиль</h3>
+                <div class="setting-row"><label>Имя</label><input type="text" id="setting-name" placeholder="Твоё имя"></div>
+                <div class="setting-row"><label>Пол</label><select id="setting-gender"><option value="">—</option><option value="male">Мужской</option><option value="female">Женский</option></select></div>
+                <div class="setting-row"><label>Аватар</label><label class="upload-btn small">Выбрать<input type="file" accept="image/*" onchange="uploadAvatar(this.files[0])" hidden></label></div>
+            </div>
+            <div class="settings-section">
+                <h3>🎨 Тема</h3>
+                <div class="setting-row"><label>Тема</label><select id="setting-theme" onchange="applyTheme(this.value)"><option value="pink">Розовая</option><option value="dark">Тёмная</option><option value="blue">Голубая</option></select></div>
+                <div class="setting-row"><label>Обои</label><label class="upload-btn small">Выбрать<input type="file" accept="image/*" onchange="uploadWallpaper(this.files[0])" hidden></label></div>
+            </div>
+            <div class="settings-section">
+                <h3>🤖 Дарья</h3>
+                <div class="setting-row"><label>Режим</label><select id="setting-mode"><option value="adaptive">Адаптивный</option><option value="companion">Подруга</option><option value="assistant">Помощник</option></select></div>
+                <div class="setting-row"><label>Внимание</label><input type="checkbox" id="setting-attention" checked></div>
+                <div class="setting-row"><label>Показывать настроение</label><input type="checkbox" id="setting-show-mood" checked></div>
+                <div class="setting-row"><label>LLM</label><span id="llm-status">—</span></div>
+            </div>
+            <button class="btn-primary" onclick="saveSettings()">💾 Сохранить</button>
+        </div>
+    </template>
+
+    <template id="memory-content">
+        <div class="memory-container">
+            <div class="memory-stats">
+                <div class="stat"><span class="stat-value" id="stat-conversations">0</span><span>💬 Диалогов</span></div>
+                <div class="stat"><span class="stat-value" id="stat-facts">0</span><span>📝 Фактов</span></div>
+            </div>
+            <div class="memory-facts" id="memory-facts"></div>
+            <button class="btn-danger" onclick="clearMemory()">🗑️ Очистить</button>
+        </div>
+    </template>
+
+    <template id="store-content">
+        <div class="store-container">
+            <div class="store-header"><h3>🛒 Магазин плагинов</h3><button onclick="refreshStore()">🔄</button></div>
+            <div class="store-plugins" id="store-plugins"><div class="loading">Загрузка...</div></div>
+        </div>
+    </template>
+
+    <template id="support-content">
+        <div class="support-container">
+            <div class="support-icon">☕</div>
+            <h2>Поддержать проект</h2>
+            <p>DARIA — бесплатный проект. Если нравится, поддержи разработку! 💕</p>
+            <div class="support-buttons">
+                <a href="https://www.buymeacoffee.com/dariumi" target="_blank" class="support-btn coffee">☕ Buy Me a Coffee</a>
+                <a href="https://boosty.to/dariumi" target="_blank" class="support-btn boosty">🌸 Boosty</a>
+                <a href="https://github.com/dariumi/Daria" target="_blank" class="support-btn github">⭐ GitHub Star</a>
+            </div>
+            <p class="thanks">Спасибо! 💖 — Дарья</p>
+        </div>
+    </template>
+
+    <template id="about-content">
+        <div class="about-container">
+            <div class="about-avatar">🌸</div>
+            <h2>Дарья</h2>
+            <span class="version">v{{ version }}</span>
+            <p>Привет! Я твоя виртуальная подруга и помощница. 💕</p>
+            <p>Люблю общаться и помогать с задачами!</p>
+            <div class="about-links">
+                <a href="https://github.com/dariumi/Daria" target="_blank">GitHub</a>
+                <a href="https://t.me/daria_ai" target="_blank">Telegram</a>
+            </div>
+            <p class="footer">Сделано с 💕</p>
+        </div>
+    </template>
+
+    <script src="/static/js/desktop.js"></script>
+</body>
+</html>

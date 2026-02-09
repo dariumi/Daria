@@ -1,0 +1,130 @@
+<div class="telegram-plugin">
+    <div class="plugin-header">
+        <span class="plugin-icon">🤖</span>
+        <h3>Telegram Бот</h3>
+    </div>
+    
+    <div class="plugin-status" id="tg-status">
+        <span class="status-dot" id="tg-status-dot"></span>
+        <span id="tg-status-text">Загрузка...</span>
+    </div>
+    
+    <div class="plugin-form">
+        <div class="form-group">
+            <label>Bot Token</label>
+            <input type="password" id="tg-token" placeholder="123456:ABC-DEF...">
+            <small>Получи у <a href="https://t.me/BotFather" target="_blank">@BotFather</a></small>
+        </div>
+        
+        <div class="form-group">
+            <label>Разрешённые User ID</label>
+            <input type="text" id="tg-users" placeholder="123456789, 987654321">
+            <small>Оставь пустым для всех</small>
+        </div>
+        
+        <div class="form-group checkbox">
+            <label>
+                <input type="checkbox" id="tg-autostart">
+                Автозапуск при старте
+            </label>
+        </div>
+    </div>
+    
+    <div class="plugin-actions">
+        <button class="btn-primary" id="tg-save" onclick="tgSaveSettings()">💾 Сохранить</button>
+        <button class="btn-secondary" id="tg-toggle" onclick="tgToggleBot()">▶️ Запустить</button>
+    </div>
+    
+    <div class="plugin-info" id="tg-info"></div>
+</div>
+
+<style>
+.telegram-plugin { padding: 16px; }
+.plugin-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.plugin-icon { font-size: 32px; }
+.plugin-header h3 { margin: 0; font-size: 18px; }
+.plugin-status { display: flex; align-items: center; gap: 8px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px; margin-bottom: 16px; }
+.status-dot { width: 10px; height: 10px; border-radius: 50%; background: #9ca3af; }
+.status-dot.running { background: #4ade80; animation: pulse 1.5s infinite; }
+.status-dot.error { background: #ef4444; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+.plugin-form { display: flex; flex-direction: column; gap: 14px; margin-bottom: 16px; }
+.form-group { display: flex; flex-direction: column; gap: 4px; }
+.form-group label { font-size: 13px; color: var(--text-secondary); }
+.form-group input[type="text"], .form-group input[type="password"] {
+    padding: 10px 12px; background: var(--bg-input); border: 1px solid var(--border-color);
+    border-radius: 6px; color: var(--text-primary); font-size: 13px;
+}
+.form-group small { font-size: 11px; color: var(--text-muted); }
+.form-group small a { color: var(--primary); }
+.form-group.checkbox label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.plugin-actions { display: flex; gap: 10px; }
+.plugin-actions button { flex: 1; padding: 10px; }
+.plugin-info { margin-top: 16px; font-size: 12px; color: var(--text-muted); text-align: center; }
+</style>
+
+<script>
+(function() {
+    let running = false;
+    
+    async function tgAction(action, data = {}) {
+        const r = await fetch('/api/plugins/telegram-bot/action', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action, data})
+        });
+        return r.json();
+    }
+    
+    function updateStatus() {
+        const dot = document.getElementById('tg-status-dot');
+        const text = document.getElementById('tg-status-text');
+        const btn = document.getElementById('tg-toggle');
+        
+        if (running) {
+            dot.className = 'status-dot running';
+            text.textContent = 'Бот работает';
+            btn.textContent = '⏹️ Остановить';
+        } else {
+            dot.className = 'status-dot';
+            text.textContent = 'Бот остановлен';
+            btn.textContent = '▶️ Запустить';
+        }
+    }
+    
+    window.tgSaveSettings = async function() {
+        const token = document.getElementById('tg-token').value;
+        const usersStr = document.getElementById('tg-users').value;
+        const autostart = document.getElementById('tg-autostart').checked;
+        
+        const users = usersStr ? usersStr.split(',').map(u => parseInt(u.trim())).filter(u => !isNaN(u)) : [];
+        
+        await tgAction('save_settings', {
+            bot_token: token,
+            allowed_users: users,
+            auto_start: autostart
+        });
+        
+        document.getElementById('tg-info').textContent = '✅ Настройки сохранены!';
+        setTimeout(() => document.getElementById('tg-info').textContent = '', 3000);
+    };
+    
+    window.tgToggleBot = async function() {
+        const action = running ? 'stop_bot' : 'start_bot';
+        const result = await tgAction(action);
+        running = result.running;
+        updateStatus();
+    };
+    
+    // Init
+    tgAction('get_status').then(data => {
+        running = data.running;
+        updateStatus();
+        
+        if (!data.has_telegram) {
+            document.getElementById('tg-info').innerHTML = 
+                '⚠️ Требуется установить: <code>pip install python-telegram-bot</code>';
+        }
+    });
+})();
+</script>

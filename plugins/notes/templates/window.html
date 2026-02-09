@@ -1,0 +1,153 @@
+<div class="notes-plugin">
+    <div class="notes-header">
+        <input type="text" id="notes-search" placeholder="🔍 Поиск..." oninput="notesSearch(this.value)">
+        <button class="btn-primary" onclick="notesNew()">+ Новая</button>
+    </div>
+    
+    <div class="notes-list" id="notes-list"></div>
+    
+    <div id="note-editor" class="note-editor hidden">
+        <input type="hidden" id="note-id">
+        <input type="text" id="note-title" placeholder="Заголовок...">
+        <textarea id="note-content" placeholder="Текст заметки..."></textarea>
+        <input type="text" id="note-tags" placeholder="Теги через запятую...">
+        <div class="editor-actions">
+            <button class="btn-primary" onclick="notesSave()">💾 Сохранить</button>
+            <button class="btn-secondary" onclick="notesCancel()">Отмена</button>
+            <button class="btn-danger" onclick="notesDelete()">🗑️</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.notes-plugin { display: flex; flex-direction: column; height: 100%; gap: 12px; }
+.notes-header { display: flex; gap: 10px; }
+.notes-header input { flex: 1; padding: 10px 14px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); font-size: 13px; }
+.notes-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.note-item { padding: 12px; background: rgba(255,255,255,0.05); border-radius: 8px; cursor: pointer; }
+.note-item:hover { background: rgba(255,255,255,0.1); }
+.note-item h4 { margin: 0 0 4px; font-size: 14px; }
+.note-item p { margin: 0; font-size: 12px; color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.note-item .note-meta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--text-muted); }
+.note-tags { display: flex; gap: 4px; }
+.note-tag { background: var(--primary); color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; }
+.note-editor { display: flex; flex-direction: column; gap: 10px; }
+.note-editor.hidden { display: none; }
+.note-editor input, .note-editor textarea { padding: 10px 12px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); font-size: 13px; }
+.note-editor textarea { min-height: 150px; resize: vertical; }
+.editor-actions { display: flex; gap: 8px; }
+.editor-actions button { flex: 1; padding: 10px; }
+.empty-state { text-align: center; color: var(--text-muted); padding: 40px; }
+</style>
+
+<script>
+(function() {
+    let notes = [];
+    let currentNoteId = null;
+    
+    async function action(act, data = {}) {
+        const r = await fetch('/api/plugins/notes/action', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: act, data})
+        });
+        return r.json();
+    }
+    
+    function render() {
+        const list = document.getElementById('notes-list');
+        if (!notes.length) {
+            list.innerHTML = '<div class="empty-state">📝 Пока нет заметок<br>Создай первую!</div>';
+            return;
+        }
+        
+        list.innerHTML = notes.map(n => `
+            <div class="note-item" onclick="notesEdit('${n.id}')">
+                <h4>${n.title || 'Без названия'}</h4>
+                <p>${n.content || ''}</p>
+                <div class="note-meta">
+                    <div class="note-tags">
+                        ${(n.tags || []).map(t => `<span class="note-tag">${t}</span>`).join('')}
+                    </div>
+                    <span>${new Date(n.updated).toLocaleDateString('ru')}</span>
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    window.notesSearch = async function(query) {
+        if (!query) {
+            const data = await action('get_notes');
+            notes = data.notes || [];
+        } else {
+            const data = await action('search', {query});
+            notes = data.notes || [];
+        }
+        render();
+    };
+    
+    window.notesNew = function() {
+        currentNoteId = null;
+        document.getElementById('note-id').value = '';
+        document.getElementById('note-title').value = '';
+        document.getElementById('note-content').value = '';
+        document.getElementById('note-tags').value = '';
+        document.getElementById('note-editor').classList.remove('hidden');
+        document.getElementById('notes-list').style.display = 'none';
+        document.querySelector('.notes-header').style.display = 'none';
+    };
+    
+    window.notesEdit = function(id) {
+        const note = notes.find(n => n.id === id);
+        if (!note) return;
+        
+        currentNoteId = id;
+        document.getElementById('note-id').value = id;
+        document.getElementById('note-title').value = note.title || '';
+        document.getElementById('note-content').value = note.content || '';
+        document.getElementById('note-tags').value = (note.tags || []).join(', ');
+        document.getElementById('note-editor').classList.remove('hidden');
+        document.getElementById('notes-list').style.display = 'none';
+        document.querySelector('.notes-header').style.display = 'none';
+    };
+    
+    window.notesSave = async function() {
+        const title = document.getElementById('note-title').value;
+        const content = document.getElementById('note-content').value;
+        const tagsStr = document.getElementById('note-tags').value;
+        const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(t => t) : [];
+        
+        if (currentNoteId) {
+            await action('update_note', {id: currentNoteId, title, content, tags});
+        } else {
+            await action('add_note', {title, content, tags});
+        }
+        
+        notesCancel();
+        const data = await action('get_notes');
+        notes = data.notes || [];
+        render();
+    };
+    
+    window.notesCancel = function() {
+        document.getElementById('note-editor').classList.add('hidden');
+        document.getElementById('notes-list').style.display = '';
+        document.querySelector('.notes-header').style.display = '';
+    };
+    
+    window.notesDelete = async function() {
+        if (!currentNoteId || !confirm('Удалить заметку?')) return;
+        await action('delete_note', {id: currentNoteId});
+        notesCancel();
+        const data = await action('get_notes');
+        notes = data.notes || [];
+        render();
+    };
+    
+    // Init
+    action('get_notes').then(data => {
+        notes = data.notes || [];
+        render();
+    });
+})();
+</script>

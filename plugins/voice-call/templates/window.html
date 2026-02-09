@@ -1,0 +1,326 @@
+<div class="call-window" id="voice-call-plugin">
+    <div class="call-status" id="call-status">
+        <span class="status-text">Готов к звонку</span>
+        <span class="status-time" id="call-timer">00:00</span>
+    </div>
+    
+    <div class="call-avatar-section">
+        <div class="call-avatar" id="call-avatar">
+            <div class="avatar-image">🌸</div>
+            <div class="avatar-pulse" id="avatar-pulse"></div>
+        </div>
+        <div class="call-name">Дарья</div>
+        <div class="call-subtitle" id="call-subtitle">Нажми кнопку, чтобы позвонить</div>
+    </div>
+    
+    <div class="call-messages" id="call-messages"></div>
+    
+    <div class="call-text-input hidden" id="text-input-section">
+        <input type="text" id="call-text-input" placeholder="Напиши сообщение..." 
+               onkeypress="if(event.key==='Enter')sendTextMessage()">
+        <button onclick="sendTextMessage()">➤</button>
+    </div>
+    
+    <div class="call-controls">
+        <button class="call-btn mute-btn" id="mute-btn" onclick="toggleMute()" title="Микрофон">
+            <span class="btn-icon">🎤</span>
+        </button>
+        <button class="call-btn main-btn" id="call-main-btn" onclick="toggleCall()">
+            <span class="btn-icon" id="call-btn-icon">📞</span>
+        </button>
+        <button class="call-btn text-btn" id="text-btn" onclick="toggleTextMode()" title="Текст">
+            <span class="btn-icon">💬</span>
+        </button>
+    </div>
+    
+    <div class="call-stats">
+        <span>Звонков: <span id="total-calls">0</span></span>
+        <span>•</span>
+        <span>Сообщений: <span id="total-messages">0</span></span>
+    </div>
+</div>
+
+<style>
+.call-window {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: linear-gradient(180deg, rgba(255,105,180,0.1) 0%, transparent 50%);
+    padding: 0;
+    margin: -16px;
+}
+.call-status {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: rgba(0,0,0,0.2);
+    font-size: 13px;
+}
+.status-text { color: var(--text-secondary); }
+.call-status.active .status-text { color: #4ade80; }
+.status-time { font-family: monospace; color: var(--text-muted); }
+.call-avatar-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 20px;
+}
+.call-avatar {
+    position: relative;
+    width: 110px;
+    height: 110px;
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 14px;
+}
+.call-avatar .avatar-image { font-size: 50px; }
+.call-avatar .avatar-pulse {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border: 3px solid var(--primary);
+    opacity: 0;
+}
+.call-avatar.active .avatar-pulse {
+    animation: call-pulse 1.5s infinite;
+}
+@keyframes call-pulse {
+    0% { transform: scale(1); opacity: 0.5; }
+    100% { transform: scale(1.3); opacity: 0; }
+}
+.call-name { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+.call-subtitle { font-size: 12px; color: var(--text-secondary); }
+.call-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 60px;
+}
+.call-message {
+    max-width: 85%;
+    padding: 8px 12px;
+    border-radius: 14px;
+    font-size: 13px;
+}
+.call-message.user {
+    align-self: flex-end;
+    background: var(--primary);
+    color: white;
+}
+.call-message.assistant {
+    align-self: flex-start;
+    background: rgba(255,255,255,0.1);
+}
+.call-text-input {
+    display: flex;
+    gap: 8px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border-color);
+}
+.call-text-input.hidden { display: none; }
+.call-text-input input {
+    flex: 1;
+    padding: 10px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 18px;
+    color: var(--text-primary);
+    font-size: 13px;
+    outline: none;
+}
+.call-text-input button {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--primary);
+    border: none;
+    color: white;
+    cursor: pointer;
+}
+.call-controls {
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+    padding: 18px;
+    background: rgba(0,0,0,0.2);
+}
+.call-btn {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+.call-btn .btn-icon { font-size: 22px; }
+.call-btn.mute-btn, .call-btn.text-btn { background: rgba(255,255,255,0.1); }
+.call-btn.mute-btn:hover, .call-btn.text-btn:hover { background: rgba(255,255,255,0.2); }
+.call-btn.mute-btn.active { background: #ef4444; }
+.call-btn.text-btn.active { background: var(--primary); }
+.call-btn.main-btn {
+    width: 68px;
+    height: 68px;
+    background: #4ade80;
+}
+.call-btn.main-btn:hover { transform: scale(1.05); }
+.call-btn.main-btn.active { background: #ef4444; }
+.call-btn.main-btn .btn-icon { font-size: 28px; }
+.call-stats {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+</style>
+
+<script>
+(function() {
+    let callActive = false;
+    let muted = false;
+    let textMode = false;
+    let timerInterval = null;
+    let startTime = null;
+    
+    const statusEl = document.getElementById('call-status');
+    const subtitleEl = document.getElementById('call-subtitle');
+    const avatarEl = document.getElementById('call-avatar');
+    const mainBtn = document.getElementById('call-main-btn');
+    const btnIcon = document.getElementById('call-btn-icon');
+    const muteBtn = document.getElementById('mute-btn');
+    const textBtn = document.getElementById('text-btn');
+    const textSection = document.getElementById('text-input-section');
+    const messagesEl = document.getElementById('call-messages');
+    const timerEl = document.getElementById('call-timer');
+    
+    async function callAction(action, data = {}) {
+        const r = await fetch('/api/plugins/voice-call/action', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action, data})
+        });
+        return r.json();
+    }
+    
+    function updateTimer() {
+        if (!startTime) return;
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const min = String(Math.floor(elapsed / 60)).padStart(2, '0');
+        const sec = String(elapsed % 60).padStart(2, '0');
+        timerEl.textContent = `${min}:${sec}`;
+    }
+    
+    function addMessage(text, role) {
+        const msg = document.createElement('div');
+        msg.className = `call-message ${role}`;
+        msg.textContent = text;
+        messagesEl.appendChild(msg);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+    
+    window.toggleCall = async function() {
+        if (!callActive) {
+            // Начать звонок
+            const result = await callAction('start_call');
+            if (result.status === 'connected') {
+                callActive = true;
+                startTime = Date.now();
+                timerInterval = setInterval(updateTimer, 1000);
+                
+                statusEl.classList.add('active');
+                statusEl.querySelector('.status-text').textContent = 'Звонок идёт';
+                subtitleEl.textContent = 'Говори, я слушаю!';
+                avatarEl.classList.add('active');
+                mainBtn.classList.add('active');
+                btnIcon.textContent = '📵';
+                
+                if (result.greeting) {
+                    addMessage(result.greeting, 'assistant');
+                }
+            }
+        } else {
+            // Завершить звонок
+            const result = await callAction('end_call');
+            callActive = false;
+            clearInterval(timerInterval);
+            
+            statusEl.classList.remove('active');
+            statusEl.querySelector('.status-text').textContent = 'Звонок завершён';
+            subtitleEl.textContent = 'Нажми, чтобы позвонить снова';
+            avatarEl.classList.remove('active');
+            mainBtn.classList.remove('active');
+            btnIcon.textContent = '📞';
+            
+            if (result.farewell) {
+                addMessage(result.farewell, 'assistant');
+            }
+            
+            // Обновить статистику
+            document.getElementById('total-calls').textContent = 
+                parseInt(document.getElementById('total-calls').textContent) + 1;
+        }
+    };
+    
+    window.toggleMute = function() {
+        muted = !muted;
+        muteBtn.classList.toggle('active', muted);
+        muteBtn.querySelector('.btn-icon').textContent = muted ? '🔇' : '🎤';
+    };
+    
+    window.toggleTextMode = function() {
+        textMode = !textMode;
+        textBtn.classList.toggle('active', textMode);
+        textSection.classList.toggle('hidden', !textMode);
+        if (textMode) {
+            document.getElementById('call-text-input').focus();
+        }
+    };
+    
+    window.sendTextMessage = async function() {
+        const input = document.getElementById('call-text-input');
+        const text = input.value.trim();
+        if (!text || !callActive) return;
+        
+        input.value = '';
+        addMessage(text, 'user');
+        
+        const result = await callAction('send_text', {text});
+        if (result.response_text) {
+            addMessage(result.response_text, 'assistant');
+        }
+    };
+    
+    // Загрузить начальные данные
+    callAction('get_status').then(data => {
+        if (data.call_active) {
+            // Восстановить активный звонок
+            callActive = true;
+            startTime = Date.now() - (data.duration * 1000);
+            timerInterval = setInterval(updateTimer, 1000);
+            statusEl.classList.add('active');
+            avatarEl.classList.add('active');
+            mainBtn.classList.add('active');
+            btnIcon.textContent = '📵';
+        }
+    });
+    
+    // Загрузить статистику
+    fetch('/api/plugins/voice-call/window').then(r => r.json()).then(data => {
+        if (data.data && data.data.stats) {
+            document.getElementById('total-calls').textContent = data.data.stats.total_calls || 0;
+            document.getElementById('total-messages').textContent = data.data.stats.total_messages || 0;
+        }
+    });
+})();
+</script>

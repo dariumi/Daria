@@ -1,0 +1,89 @@
+<div class="weather-plugin">
+    <div class="weather-search">
+        <input type="text" id="weather-city" placeholder="Введи город..." value="Москва">
+        <button onclick="weatherSearch()">🔍</button>
+    </div>
+    
+    <div class="weather-current" id="weather-current">
+        <div class="weather-loading">Загрузка... 🌸</div>
+    </div>
+    
+    <div class="weather-comment" id="weather-comment"></div>
+    
+    <div class="weather-forecast" id="weather-forecast"></div>
+</div>
+
+<style>
+.weather-plugin { display: flex; flex-direction: column; gap: 16px; }
+.weather-search { display: flex; gap: 8px; }
+.weather-search input { flex: 1; padding: 10px 14px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); font-size: 14px; }
+.weather-search button { padding: 10px 16px; background: var(--primary); border: none; border-radius: 8px; color: white; cursor: pointer; }
+.weather-current { text-align: center; padding: 20px; background: rgba(255,255,255,0.05); border-radius: 12px; }
+.weather-loading { color: var(--text-muted); }
+.weather-icon { font-size: 64px; }
+.weather-temp { font-size: 48px; font-weight: 700; color: var(--text-primary); }
+.weather-city { font-size: 18px; color: var(--text-secondary); margin-top: 4px; }
+.weather-details { display: flex; justify-content: center; gap: 24px; margin-top: 12px; font-size: 13px; color: var(--text-muted); }
+.weather-comment { text-align: center; font-size: 14px; color: var(--primary); padding: 12px; background: rgba(255,105,180,0.1); border-radius: 8px; }
+.weather-forecast { display: flex; gap: 8px; justify-content: space-between; }
+.forecast-day { flex: 1; text-align: center; padding: 12px 8px; background: rgba(255,255,255,0.05); border-radius: 8px; }
+.forecast-day .day-name { font-size: 12px; color: var(--text-muted); }
+.forecast-day .day-icon { font-size: 24px; margin: 6px 0; }
+.forecast-day .day-temp { font-size: 12px; }
+.forecast-day .day-temp span { color: var(--text-muted); }
+</style>
+
+<script>
+(function() {
+    async function action(act, data = {}) {
+        const r = await fetch('/api/plugins/weather/action', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: act, data})
+        });
+        return r.json();
+    }
+    
+    function renderWeather(data) {
+        document.getElementById('weather-current').innerHTML = `
+            <div class="weather-icon">${data.icon}</div>
+            <div class="weather-temp">${data.temp}°C</div>
+            <div class="weather-city">${data.city}</div>
+            <div class="weather-details">
+                <span>💧 ${data.humidity}%</span>
+                <span>💨 ${data.wind} м/с</span>
+            </div>
+        `;
+        
+        document.getElementById('weather-comment').textContent = data.comment;
+        
+        document.getElementById('weather-forecast').innerHTML = data.forecast.map(day => `
+            <div class="forecast-day">
+                <div class="day-name">${day.day}</div>
+                <div class="day-icon">${day.icon}</div>
+                <div class="day-temp">${day.temp_high}° <span>${day.temp_low}°</span></div>
+            </div>
+        `).join('');
+    }
+    
+    window.weatherSearch = async function() {
+        const city = document.getElementById('weather-city').value.trim();
+        if (!city) return;
+        
+        document.getElementById('weather-current').innerHTML = '<div class="weather-loading">Загрузка... 🌸</div>';
+        
+        await action('set_city', {city});
+        const data = await action('get_weather', {city});
+        
+        if (data.error) {
+            document.getElementById('weather-current').innerHTML = '<div class="weather-loading">Не удалось загрузить 😢</div>';
+            return;
+        }
+        
+        renderWeather(data);
+    };
+    
+    // Init
+    weatherSearch();
+})();
+</script>

@@ -1,0 +1,30 @@
+# ═══════════════════════════════════════════════════════════════════
+# 🌸 DARIA v0.7.3 - AI Desktop Companion
+# Python 3.10+ Required
+# ═══════════════════════════════════════════════════════════════════
+
+# WEB FRAMEWORK
+flask>=3.0.0
+werkzeug>=3.0.0
+
+# CONFIGURATION
+pyyaml>=6.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+
+# HTTP & NETWORKING
+httpx>=0.26.0
+requests>=2.31.0
+
+# AI / LLM
+ollama>=0.1.0
+
+# SYSTEM
+psutil>=5.9.0
+
+# SSL
+cryptography>=41.0.0
+
+# OS NOTIFICATIONS
+plyer>=2.1.0

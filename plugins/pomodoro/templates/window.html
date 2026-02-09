@@ -1,0 +1,189 @@
+<div class="pomodoro-plugin">
+    <div class="timer-display">
+        <div class="timer-circle" id="timer-circle">
+            <span class="timer-time" id="timer-time">25:00</span>
+            <span class="timer-label" id="timer-label">Работа</span>
+        </div>
+    </div>
+    
+    <div class="timer-message" id="timer-message">Нажми старт, когда будешь готов! 💕</div>
+    
+    <div class="timer-controls">
+        <button class="btn-primary" id="btn-start" onclick="pomodoroToggle()">▶️ Старт</button>
+        <button class="btn-secondary" onclick="pomodoroReset()">🔄 Сброс</button>
+    </div>
+    
+    <div class="timer-stats">
+        <div class="stat">
+            <span class="stat-value" id="stat-pomodoros">0</span>
+            <span class="stat-label">🍅 Помодоро</span>
+        </div>
+        <div class="stat">
+            <span class="stat-value" id="stat-minutes">0</span>
+            <span class="stat-label">⏱️ Минут</span>
+        </div>
+    </div>
+    
+    <div class="timer-settings">
+        <details>
+            <summary>⚙️ Настройки</summary>
+            <div class="settings-form">
+                <label>Работа (мин): <input type="number" id="set-work" value="25" min="1" max="60"></label>
+                <label>Короткий перерыв: <input type="number" id="set-short" value="5" min="1" max="30"></label>
+                <label>Длинный перерыв: <input type="number" id="set-long" value="15" min="5" max="60"></label>
+                <button onclick="pomodoroSaveSettings()">Сохранить</button>
+            </div>
+        </details>
+    </div>
+</div>
+
+<style>
+.pomodoro-plugin { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 20px; }
+.timer-display { position: relative; }
+.timer-circle {
+    width: 180px; height: 180px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    box-shadow: 0 0 30px var(--primary-glow);
+    transition: all 0.3s;
+}
+.timer-circle.break { background: linear-gradient(135deg, #4ade80, #22c55e); box-shadow: 0 0 30px rgba(74, 222, 128, 0.4); }
+.timer-circle.running { animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.02); } }
+.timer-time { font-size: 42px; font-weight: 700; color: white; }
+.timer-label { font-size: 14px; color: rgba(255,255,255,0.8); }
+.timer-message { text-align: center; font-size: 14px; color: var(--text-secondary); min-height: 40px; }
+.timer-controls { display: flex; gap: 12px; }
+.timer-controls button { padding: 12px 24px; font-size: 14px; }
+.timer-stats { display: flex; gap: 30px; margin-top: 10px; }
+.stat { text-align: center; }
+.stat-value { display: block; font-size: 28px; font-weight: 700; color: var(--primary); }
+.stat-label { font-size: 12px; color: var(--text-muted); }
+.timer-settings { width: 100%; margin-top: 10px; }
+.timer-settings summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+.settings-form { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.settings-form label { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+.settings-form input { width: 60px; padding: 6px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); text-align: center; }
+.settings-form button { margin-top: 8px; padding: 8px; }
+</style>
+
+<script>
+(function() {
+    let settings = {work: 25, shortBreak: 5, longBreak: 15};
+    let stats = {completed_pomodoros: 0, total_work_minutes: 0};
+    let timeLeft = 25 * 60;
+    let isRunning = false;
+    let isBreak = false;
+    let interval = null;
+    let completedInSession = 0;
+    
+    async function action(act, data = {}) {
+        const r = await fetch('/api/plugins/pomodoro/action', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: act, data})
+        });
+        return r.json();
+    }
+    
+    function updateDisplay() {
+        const mins = Math.floor(timeLeft / 60);
+        const secs = timeLeft % 60;
+        document.getElementById('timer-time').textContent = 
+            `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        
+        const circle = document.getElementById('timer-circle');
+        circle.classList.toggle('break', isBreak);
+        circle.classList.toggle('running', isRunning);
+        
+        document.getElementById('timer-label').textContent = isBreak ? 'Перерыв' : 'Работа';
+        document.getElementById('btn-start').textContent = isRunning ? '⏸️ Пауза' : '▶️ Старт';
+    }
+    
+    function updateStats() {
+        document.getElementById('stat-pomodoros').textContent = stats.completed_pomodoros;
+        document.getElementById('stat-minutes').textContent = stats.total_work_minutes;
+    }
+    
+    async function completePomodoro() {
+        if (!isBreak) {
+            const result = await action('pomodoro_complete', {minutes: settings.work});
+            stats = result.stats;
+            updateStats();
+            document.getElementById('timer-message').textContent = result.message;
+            
+            completedInSession++;
+            isBreak = true;
+            timeLeft = (completedInSession % 4 === 0 ? settings.longBreak : settings.shortBreak) * 60;
+        } else {
+            const result = await action('get_message', {type: 'work'});
+            document.getElementById('timer-message').textContent = result.message;
+            isBreak = false;
+            timeLeft = settings.work * 60;
+        }
+        
+        isRunning = false;
+        updateDisplay();
+    }
+    
+    window.pomodoroToggle = async function() {
+        if (isRunning) {
+            isRunning = false;
+            clearInterval(interval);
+        } else {
+            isRunning = true;
+            const result = await action('get_message', {type: isBreak ? 'break' : 'work'});
+            document.getElementById('timer-message').textContent = result.message;
+            
+            interval = setInterval(() => {
+                timeLeft--;
+                if (timeLeft <= 0) {
+                    clearInterval(interval);
+                    completePomodoro();
+                } else {
+                    updateDisplay();
+                }
+            }, 1000);
+        }
+        updateDisplay();
+    };
+    
+    window.pomodoroReset = function() {
+        isRunning = false;
+        isBreak = false;
+        clearInterval(interval);
+        timeLeft = settings.work * 60;
+        document.getElementById('timer-message').textContent = 'Готов начать сначала! 💕';
+        updateDisplay();
+    };
+    
+    window.pomodoroSaveSettings = async function() {
+        settings.work = parseInt(document.getElementById('set-work').value) || 25;
+        settings.shortBreak = parseInt(document.getElementById('set-short').value) || 5;
+        settings.longBreak = parseInt(document.getElementById('set-long').value) || 15;
+        
+        await action('save_settings', {
+            work_duration: settings.work,
+            short_break: settings.shortBreak,
+            long_break: settings.longBreak,
+        });
+        
+        if (!isRunning && !isBreak) {
+            timeLeft = settings.work * 60;
+            updateDisplay();
+        }
+    };
+    
+    // Init
+    action('get_stats').then(data => {
+        if (data.stats) {
+            stats = data.stats;
+            updateStats();
+        }
+    });
+    
+    updateDisplay();
+})();
+</script>

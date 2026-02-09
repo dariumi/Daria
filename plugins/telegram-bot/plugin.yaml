@@ -1,0 +1,40 @@
+# ═══════════════════════════════════════════════════════════════════
+#  DARIA Telegram Bot Plugin v1.0.0
+#  Общайся с Дарьей через Telegram
+# ═══════════════════════════════════════════════════════════════════
+
+id: telegram-bot
+name: Telegram Бот
+description: |
+  Подключи Telegram бота и общайся с Дарьей в любимом мессенджере!
+  Все сообщения синхронизируются с веб-интерфейсом.
+version: 1.0.0
+author: DARIA Team
+license: MIT
+
+icon: 🤖
+category: communication
+
+has_desktop_icon: true
+desktop_icon: 🤖
+desktop_title: Telegram
+
+has_window: true
+window_title: Telegram Бот
+window_size:
+  width: 400
+  height: 350
+window_template: window.html
+
+entry_point: main.py
+main_class: TelegramBotPlugin
+
+capabilities:
+  - network
+  - llm_access
+  - memory_access
+
+python_dependencies:
+  - python-telegram-bot>=20.7
+
+homepage: https://github.com/dariumi/Daria-Plugins
