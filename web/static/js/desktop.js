@@ -188,6 +188,7 @@ function resetIconPosition(iconId) {
 
 function initIconDrag(icon) {
     let dragging = false, hasMoved = false, startX, startY, iconX, iconY;
+    const GRID_SIZE = 100; // Размер ячейки сетки
     
     icon.addEventListener('mousedown', (e) => {
         if (e.detail >= 2) return;
@@ -216,11 +217,52 @@ function initIconDrag(icon) {
         if (!dragging) return;
         dragging = false;
         icon.classList.remove('dragging');
+        
         if (hasMoved) {
-            state.iconPositions[icon.dataset.iconId] = {
-                x: parseInt(icon.style.left) || 0,
-                y: parseInt(icon.style.top) || 0
-            };
+            // Привязка к сетке
+            let x = parseInt(icon.style.left) || 0;
+            let y = parseInt(icon.style.top) || 0;
+            
+            x = Math.round(x / GRID_SIZE) * GRID_SIZE;
+            y = Math.round(y / GRID_SIZE) * GRID_SIZE;
+            
+            // Проверяем что позиция не занята другой иконкой
+            const iconId = icon.dataset.iconId;
+            let collision = false;
+            
+            for (const [id, pos] of Object.entries(state.iconPositions)) {
+                if (id !== iconId && pos.x === x && pos.y === y) {
+                    collision = true;
+                    break;
+                }
+            }
+            
+            // Если коллизия, ищем свободную ячейку
+            if (collision) {
+                for (let tryY = 0; tryY < 600; tryY += GRID_SIZE) {
+                    for (let tryX = 0; tryX < 600; tryX += GRID_SIZE) {
+                        let free = true;
+                        for (const [id, pos] of Object.entries(state.iconPositions)) {
+                            if (id !== iconId && pos.x === tryX && pos.y === tryY) {
+                                free = false;
+                                break;
+                            }
+                        }
+                        if (free) {
+                            x = tryX;
+                            y = tryY;
+                            collision = false;
+                            break;
+                        }
+                    }
+                    if (!collision) break;
+                }
+            }
+            
+            icon.style.left = x + 'px';
+            icon.style.top = y + 'px';
+            
+            state.iconPositions[iconId] = {x, y};
             fetch('/api/desktop/icons', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(state.iconPositions)

@@ -322,8 +322,10 @@ class MemoryManager:
         self.long_term = LongTermMemory(self.data_dir)
         self.fact_extractor = FactExtractor()
         
-        # Load profile
-        self._user_profile = self.long_term.get_full_profile()
+        # Load profile from both facts and profile tables
+        self._user_profile = {}
+        self._user_profile.update(self.long_term.get_all_facts())
+        self._user_profile.update(self.long_term.get_full_profile())
     
     def add_exchange(self, user_msg: str, assistant_resp: str, emotion: str = "neutral"):
         """Add conversation exchange"""
@@ -333,8 +335,9 @@ class MemoryManager:
         facts = self.fact_extractor.extract(user_msg)
         for key, value in facts.items():
             self.long_term.store_fact(key, value)
+            self.long_term.set_profile(key, value)
             self._user_profile[key] = value
-            logger.debug(f"Extracted fact: {key}={value}")
+            logger.debug(f"Saved fact: {key}={value}")
     
     def remember(self, content: str, importance: float = 0.5) -> str:
         """Remember something"""
@@ -360,9 +363,11 @@ class MemoryManager:
         return profile
     
     def set_user_profile(self, key: str, value: str):
-        """Set user profile value"""
+        """Set user profile value - saves to both tables"""
         self._user_profile[key] = value
         self.long_term.set_profile(key, value)
+        self.long_term.store_fact(key, value)
+        logger.debug(f"Profile saved: {key}={value}")
     
     def get_user_name(self) -> Optional[str]:
         """Get user name"""

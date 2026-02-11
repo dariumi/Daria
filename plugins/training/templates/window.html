@@ -1,0 +1,250 @@
+<div class="training-plugin">
+    <div class="training-header">
+        <h3>📚 Обучение Даши</h3>
+        <span class="training-count" id="total-count">0 примеров</span>
+    </div>
+    
+    <div class="training-tabs">
+        <button class="tab active" onclick="showTab('examples')">Примеры</button>
+        <button class="tab" onclick="showTab('style')">Стиль</button>
+        <button class="tab" onclick="showTab('add')">Добавить</button>
+    </div>
+    
+    <div class="tab-content" id="tab-examples">
+        <select id="category-filter" onchange="loadExamples()">
+            <option value="all">Все категории</option>
+        </select>
+        <div class="examples-list" id="examples-list"></div>
+    </div>
+    
+    <div class="tab-content hidden" id="tab-style">
+        <div class="form-group">
+            <label>Заметки по стилю общения</label>
+            <textarea id="style-notes" placeholder="Например: Отвечай кратко, используй эмодзи уместно..."></textarea>
+        </div>
+        <div class="form-group">
+            <label>Избегать фразы (через запятую)</label>
+            <input type="text" id="avoid-phrases" placeholder="фраза1, фраза2...">
+        </div>
+        <div class="form-group">
+            <label>Предпочтительные фразы</label>
+            <input type="text" id="prefer-phrases" placeholder="фраза1, фраза2...">
+        </div>
+        <button class="btn-primary" onclick="saveStyle()">💾 Сохранить стиль</button>
+    </div>
+    
+    <div class="tab-content hidden" id="tab-add">
+        <div class="form-group">
+            <label>Категория</label>
+            <select id="new-category"></select>
+        </div>
+        <div class="form-group">
+            <label>Сообщение пользователя</label>
+            <input type="text" id="new-input" placeholder="Что пишет пользователь...">
+        </div>
+        <div class="form-group">
+            <label>Как должна ответить Даша</label>
+            <textarea id="new-output" placeholder="Идеальный ответ Даши..."></textarea>
+        </div>
+        <div class="form-group">
+            <label>Контекст (необязательно)</label>
+            <input type="text" id="new-context" placeholder="Время суток, настроение и т.д.">
+        </div>
+        <button class="btn-primary" onclick="addExample()">➕ Добавить пример</button>
+    </div>
+    
+    <div class="training-footer">
+        <button onclick="exportData()">📤 Экспорт</button>
+        <label class="upload-btn">
+            📥 Импорт
+            <input type="file" accept=".json" onchange="importData(this.files[0])" hidden>
+        </label>
+    </div>
+</div>
+
+<style>
+.training-plugin { display: flex; flex-direction: column; height: 100%; gap: 12px; }
+.training-header { display: flex; justify-content: space-between; align-items: center; }
+.training-header h3 { margin: 0; font-size: 16px; }
+.training-count { font-size: 12px; color: var(--text-muted); background: rgba(255,255,255,0.1); padding: 4px 10px; border-radius: 10px; }
+.training-tabs { display: flex; gap: 4px; }
+.tab { flex: 1; padding: 10px; background: rgba(255,255,255,0.05); border: none; border-radius: 6px; color: var(--text-secondary); cursor: pointer; font-size: 13px; }
+.tab.active { background: var(--primary); color: white; }
+.tab-content { flex: 1; overflow-y: auto; }
+.tab-content.hidden { display: none; }
+.form-group { margin-bottom: 12px; }
+.form-group label { display: block; margin-bottom: 4px; font-size: 12px; color: var(--text-secondary); }
+.form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px 12px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); font-size: 13px; }
+.form-group textarea { min-height: 80px; resize: vertical; }
+#category-filter { margin-bottom: 12px; }
+.examples-list { display: flex; flex-direction: column; gap: 8px; }
+.example-item { padding: 12px; background: rgba(0,0,0,0.2); border-radius: 8px; position: relative; }
+.example-item .example-input { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.example-item .example-output { font-size: 13px; color: var(--primary); }
+.example-item .example-delete { position: absolute; top: 8px; right: 8px; background: none; border: none; color: var(--text-muted); cursor: pointer; opacity: 0.5; }
+.example-item:hover .example-delete { opacity: 1; }
+.training-footer { display: flex; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border-color); }
+.training-footer button, .training-footer .upload-btn { padding: 8px 16px; background: rgba(255,255,255,0.1); border: none; border-radius: 6px; color: var(--text-primary); cursor: pointer; font-size: 12px; }
+.empty-state { text-align: center; padding: 30px; color: var(--text-muted); }
+</style>
+
+<script>
+(function() {
+    let categories = {};
+    let examples = {};
+    let style = {};
+    
+    async function action(act, data = {}) {
+        const r = await fetch('/api/plugins/training/action', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: act, data})
+        });
+        return r.json();
+    }
+    
+    window.showTab = function(tab) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+        event.target.classList.add('active');
+        document.getElementById('tab-' + tab).classList.remove('hidden');
+    };
+    
+    async function init() {
+        const r = await fetch('/api/plugins/training/window');
+        const data = await r.json();
+        
+        categories = data.data?.categories || {};
+        examples = data.data?.examples || {};
+        style = data.data?.style || {};
+        
+        // Fill category selects
+        const filter = document.getElementById('category-filter');
+        const newCat = document.getElementById('new-category');
+        
+        Object.entries(categories).forEach(([key, name]) => {
+            filter.innerHTML += `<option value="${key}">${name}</option>`;
+            newCat.innerHTML += `<option value="${key}">${name}</option>`;
+        });
+        
+        // Fill style
+        document.getElementById('style-notes').value = style.notes || '';
+        document.getElementById('avoid-phrases').value = (style.avoid_phrases || []).join(', ');
+        document.getElementById('prefer-phrases').value = (style.preferred_phrases || []).join(', ');
+        
+        updateCount();
+        loadExamples();
+    }
+    
+    function updateCount() {
+        const total = Object.values(examples).reduce((sum, arr) => sum + arr.length, 0);
+        document.getElementById('total-count').textContent = total + ' примеров';
+    }
+    
+    window.loadExamples = function() {
+        const category = document.getElementById('category-filter').value;
+        const list = document.getElementById('examples-list');
+        
+        let items = [];
+        if (category === 'all') {
+            Object.entries(examples).forEach(([cat, exs]) => {
+                exs.forEach((ex, i) => items.push({...ex, category: cat, index: i}));
+            });
+        } else {
+            (examples[category] || []).forEach((ex, i) => items.push({...ex, category, index: i}));
+        }
+        
+        if (!items.length) {
+            list.innerHTML = '<div class="empty-state">Нет примеров</div>';
+            return;
+        }
+        
+        list.innerHTML = items.map(ex => `
+            <div class="example-item">
+                <div class="example-input">👤 ${ex.input}</div>
+                <div class="example-output">🌸 ${ex.output}</div>
+                <button class="example-delete" onclick="deleteExample('${ex.category}', ${ex.index})">🗑️</button>
+            </div>
+        `).join('');
+    };
+    
+    window.addExample = async function() {
+        const result = await action('add_example', {
+            category: document.getElementById('new-category').value,
+            input: document.getElementById('new-input').value,
+            output: document.getElementById('new-output').value,
+            context: document.getElementById('new-context').value,
+        });
+        
+        if (result.error) {
+            alert(result.error);
+            return;
+        }
+        
+        document.getElementById('new-input').value = '';
+        document.getElementById('new-output').value = '';
+        document.getElementById('new-context').value = '';
+        
+        // Reload
+        const r = await action('get_examples', {category: 'all'});
+        examples = r.examples || {};
+        updateCount();
+        loadExamples();
+        
+        alert('Пример добавлен! 🌸');
+    };
+    
+    window.deleteExample = async function(category, index) {
+        if (!confirm('Удалить пример?')) return;
+        await action('delete_example', {category, index});
+        
+        const r = await action('get_examples', {category: 'all'});
+        examples = r.examples || {};
+        updateCount();
+        loadExamples();
+    };
+    
+    window.saveStyle = async function() {
+        const avoid = document.getElementById('avoid-phrases').value.split(',').map(s => s.trim()).filter(s => s);
+        const prefer = document.getElementById('prefer-phrases').value.split(',').map(s => s.trim()).filter(s => s);
+        
+        await action('save_style', {
+            notes: document.getElementById('style-notes').value,
+            avoid_phrases: avoid,
+            preferred_phrases: prefer,
+        });
+        
+        alert('Стиль сохранён! 💕');
+    };
+    
+    window.exportData = async function() {
+        const result = await action('export');
+        const blob = new Blob([JSON.stringify(result.data, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'daria-training.json';
+        a.click();
+    };
+    
+    window.importData = async function(file) {
+        if (!file) return;
+        const text = await file.text();
+        try {
+            const data = JSON.parse(text);
+            await action('import', {data});
+            
+            const r = await action('get_examples', {category: 'all'});
+            examples = r.examples || {};
+            updateCount();
+            loadExamples();
+            
+            alert('Данные импортированы! 🌸');
+        } catch (e) {
+            alert('Ошибка импорта: ' + e.message);
+        }
+    };
+    
+    init();
+})();
+</script>

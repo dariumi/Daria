@@ -238,7 +238,7 @@ class AttentionThread(threading.Thread):
 #  Flask App
 # ═══════════════════════════════════════════════════════════════════
 
-VERSION = "0.7.3"
+VERSION = "0.7.4"
 
 app = Flask(__name__,
     template_folder=str(Path(__file__).parent / "templates"),
@@ -866,7 +866,7 @@ def run_server(host: str = "127.0.0.1", port: int = 8000,
     notifications.add("DARIA", f"Система запущена v{VERSION}", "success", "🌸", 8000)
     logger.info("Ready!")
     
-    app.run(host=host, port=port, debug=debug, threaded=True, ssl_context=ssl_context,use_reloader=False,)
+    app.run(host=host, port=port, debug=debug, threaded=True, ssl_context=ssl_context)
 
 
 application = app

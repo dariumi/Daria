@@ -1,0 +1,36 @@
+# ═══════════════════════════════════════════════════════════════════
+#  DARIA Games Plugin v1.0.0
+#  Визуальные игры с Дашей
+# ═══════════════════════════════════════════════════════════════════
+
+id: games
+name: Игры
+description: |
+  Играй с Дашей в разные игры!
+  • Крестики-нолики
+  • Змейка
+  • Memory (найди пару)
+  • Реакция
+version: 1.0.0
+author: DARIA Team
+license: MIT
+
+icon: 🎮
+category: entertainment
+
+has_desktop_icon: true
+desktop_icon: 🎮
+desktop_title: Игры
+
+has_window: true
+window_title: Игры с Дашей
+window_size:
+  width: 420
+  height: 520
+window_template: window.html
+
+entry_point: main.py
+main_class: GamesPlugin
+
+capabilities:
+  - memory_access

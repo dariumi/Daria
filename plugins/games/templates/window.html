@@ -1,0 +1,288 @@
+<div class="games-plugin">
+    <div class="games-header">
+        <h3>🎮 Игры с Дашей</h3>
+        <div class="stats">🏆 <span id="wins">0</span> | 😊 <span id="coop">0</span></div>
+    </div>
+    
+    <div class="games-menu" id="games-menu">
+        <button class="game-btn" onclick="startGame('tictactoe')">
+            <span>⭕</span><span>Крестики-нолики</span>
+        </button>
+        <button class="game-btn coop" onclick="startGame('firewater')">
+            <span>🔥💧</span><span>Огонь и Вода</span>
+            <small>Кооп!</small>
+        </button>
+        <button class="game-btn" onclick="startGame('memory')">
+            <span>🃏</span><span>Memory</span>
+        </button>
+        <button class="game-btn" onclick="startGame('reaction')">
+            <span>⚡</span><span>Реакция</span>
+        </button>
+    </div>
+    
+    <div class="game-area hidden" id="game-area">
+        <div class="game-header">
+            <button onclick="backToMenu()">← Меню</button>
+            <span id="daria-comment">Играем! 🌸</span>
+        </div>
+        <div id="game-content"></div>
+    </div>
+</div>
+
+<style>
+.games-plugin { display: flex; flex-direction: column; height: 100%; }
+.games-header { display: flex; justify-content: space-between; margin-bottom: 12px; }
+.games-header h3 { margin: 0; font-size: 15px; }
+.stats { font-size: 13px; color: var(--text-muted); }
+.games-menu { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.game-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 20px 12px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 10px; cursor: pointer; transition: all 0.2s; color: var(--text-primary); position: relative; }
+.game-btn:hover { background: rgba(255,255,255,0.1); transform: translateY(-2px); }
+.game-btn.coop { border-color: var(--primary); }
+.game-btn.coop small { position: absolute; top: 4px; right: 6px; font-size: 10px; color: var(--primary); }
+.game-btn span:first-child { font-size: 28px; }
+.game-btn span:nth-child(2) { font-size: 12px; }
+.game-area.hidden { display: none; }
+.game-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.game-header button { padding: 5px 10px; background: rgba(255,255,255,0.1); border: none; border-radius: 5px; color: var(--text-primary); cursor: pointer; font-size: 12px; }
+#daria-comment { flex: 1; text-align: center; font-size: 12px; color: var(--primary); }
+
+/* Tic Tac Toe */
+.ttt-board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-width: 200px; margin: 0 auto; }
+.ttt-cell { aspect-ratio: 1; background: rgba(255,255,255,0.1); border-radius: 6px; font-size: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.ttt-cell.x { color: #60a5fa; }
+.ttt-cell.o { color: var(--primary); }
+
+/* Fire Water */
+.fw-container { position: relative; width: 100%; height: 320px; background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%); border-radius: 8px; overflow: hidden; }
+.fw-player { position: absolute; width: 24px; height: 24px; border-radius: 50%; transition: all 0.1s; }
+.fw-fire { background: linear-gradient(135deg, #ff6b35, #f7931e); box-shadow: 0 0 10px #ff6b35; }
+.fw-water { background: linear-gradient(135deg, #4facfe, #00f2fe); box-shadow: 0 0 10px #4facfe; }
+.fw-goal { position: absolute; width: 30px; height: 30px; border-radius: 4px; opacity: 0.5; }
+.fw-goal-fire { background: #ff6b35; }
+.fw-goal-water { background: #4facfe; }
+.fw-platform { position: absolute; height: 10px; background: #333; border-radius: 2px; }
+.fw-hazard { position: absolute; width: 20px; height: 20px; border-radius: 3px; }
+.fw-controls { display: flex; justify-content: center; gap: 8px; margin-top: 10px; }
+.fw-controls button { padding: 10px 16px; background: #4facfe; border: none; border-radius: 5px; color: white; cursor: pointer; font-size: 16px; }
+.fw-info { text-align: center; margin-top: 8px; font-size: 11px; color: var(--text-muted); }
+
+/* Memory */
+.memory-board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; max-width: 240px; margin: 0 auto; }
+.memory-card { aspect-ratio: 1; background: var(--primary); border-radius: 6px; font-size: 20px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
+.memory-card.flipped, .memory-card.matched { background: rgba(255,255,255,0.1); }
+.memory-card:not(.flipped):not(.matched) span { visibility: hidden; }
+.memory-card.matched { opacity: 0.4; }
+
+/* Reaction */
+.reaction-area { text-align: center; padding: 30px; }
+.reaction-target { width: 100px; height: 100px; border-radius: 50%; margin: 15px auto; display: flex; align-items: center; justify-content: center; font-size: 36px; transition: all 0.15s; }
+.reaction-target.wait { background: rgba(255,255,255,0.1); }
+.reaction-target.go { background: #ef4444; cursor: pointer; animation: pulse 0.4s infinite; }
+@keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+.reaction-result { font-size: 20px; font-weight: 700; margin: 12px 0; }
+</style>
+
+<script>
+(function() {
+    let game = null;
+    let state = {};
+    
+    async function action(act, data = {}) {
+        const r = await fetch('/api/plugins/games/action', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: act, data})
+        });
+        return r.json();
+    }
+    
+    function comment(text) {
+        document.getElementById('daria-comment').textContent = text;
+    }
+    
+    window.startGame = async function(g) {
+        game = g;
+        document.getElementById('games-menu').classList.add('hidden');
+        document.getElementById('game-area').classList.remove('hidden');
+        const content = document.getElementById('game-content');
+        
+        if (g === 'tictactoe') {
+            state.board = Array(9).fill('');
+            state.turn = 'X';
+            content.innerHTML = `<div class="ttt-board">${Array(9).fill('<div class="ttt-cell"></div>').join('')}</div>`;
+            document.querySelectorAll('.ttt-cell').forEach((c,i) => c.onclick = () => tttClick(i));
+            comment('Твой ход! X 🎯');
+        }
+        else if (g === 'firewater') {
+            const r = await action('start_firewater');
+            state.fw = r.state;
+            renderFireWater(r.level, r.state);
+            comment(r.comment);
+        }
+        else if (g === 'memory') {
+            const r = await action('start_memory');
+            state.cards = r.cards;
+            state.flipped = [];
+            state.matched = 0;
+            content.innerHTML = `<div class="memory-board">${r.cards.map((c,i) => `<div class="memory-card" onclick="memoryClick(${i})"><span>${c}</span></div>`).join('')}</div>`;
+            comment(r.comment);
+        }
+        else if (g === 'reaction') {
+            content.innerHTML = `<div class="reaction-area"><p>Жми когда станет красным!</p><div class="reaction-target wait" id="rt">⏳</div><div class="reaction-result" id="rr"></div><button onclick="startReaction()">Старт</button></div>`;
+            comment('Проверим реакцию! ⚡');
+        }
+    };
+    
+    window.backToMenu = function() {
+        document.getElementById('games-menu').classList.remove('hidden');
+        document.getElementById('game-area').classList.add('hidden');
+        game = null;
+        state = {};
+    };
+    
+    // Tic Tac Toe
+    window.tttClick = async function(i) {
+        if (state.board[i] || state.turn !== 'X') return;
+        const cells = document.querySelectorAll('.ttt-cell');
+        state.board[i] = 'X';
+        cells[i].textContent = 'X';
+        cells[i].classList.add('x');
+        
+        if (checkWin('X')) { endGame('lose'); return; }
+        if (state.board.every(c => c)) { endGame('draw'); return; }
+        
+        state.turn = 'O';
+        comment('Думаю... 🤔');
+        
+        const r = await action('ttt_move', {board: state.board});
+        if (r.move >= 0) {
+            setTimeout(() => {
+                state.board[r.move] = 'O';
+                cells[r.move].textContent = 'O';
+                cells[r.move].classList.add('o');
+                comment(r.comment);
+                if (checkWin('O')) endGame('win');
+                else state.turn = 'X';
+            }, 400);
+        }
+    };
+    
+    function checkWin(p) {
+        const w = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+        return w.some(l => l.every(i => state.board[i] === p));
+    }
+    
+    // Fire Water
+    function renderFireWater(level, st) {
+        const content = document.getElementById('game-content');
+        content.innerHTML = `
+            <div class="fw-container" id="fw-game">
+                <div class="fw-goal fw-goal-fire" style="left:${level.fire_goal[0]}px;top:${level.fire_goal[1]}px"></div>
+                <div class="fw-goal fw-goal-water" style="left:${level.water_goal[0]}px;top:${level.water_goal[1]}px"></div>
+                ${level.platforms.map(p => `<div class="fw-platform" style="left:${p[0]}px;top:${p[1]}px;width:60px"></div>`).join('')}
+                <div class="fw-player fw-fire" id="fw-fire" style="left:${st.fire[0]}px;top:${st.fire[1]}px"></div>
+                <div class="fw-player fw-water" id="fw-water" style="left:${st.water[0]}px;top:${st.water[1]}px"></div>
+            </div>
+            <div class="fw-controls">
+                <button onclick="fwMove(-1,0)">←</button>
+                <button onclick="fwMove(0,-1)">↑</button>
+                <button onclick="fwMove(0,1)">↓</button>
+                <button onclick="fwMove(1,0)">→</button>
+            </div>
+            <div class="fw-info">Стрелки: управление водой. Даша управляет огнём!</div>
+        `;
+        
+        document.addEventListener('keydown', fwKeyHandler);
+    }
+    
+    function fwKeyHandler(e) {
+        if (game !== 'firewater') return;
+        const moves = {ArrowLeft: [-1,0], ArrowRight: [1,0], ArrowUp: [0,-1], ArrowDown: [0,1]};
+        if (moves[e.key]) { fwMove(...moves[e.key]); e.preventDefault(); }
+    }
+    
+    window.fwMove = async function(dx, dy) {
+        const r = await action('fw_move', {dx, dy});
+        if (r.fire_pos) {
+            document.getElementById('fw-fire').style.left = r.fire_pos[0] + 'px';
+            document.getElementById('fw-fire').style.top = r.fire_pos[1] + 'px';
+        }
+        if (r.water_pos) {
+            document.getElementById('fw-water').style.left = r.water_pos[0] + 'px';
+            document.getElementById('fw-water').style.top = r.water_pos[1] + 'px';
+        }
+        if (r.comment) comment(r.comment);
+        if (r.level_complete) { comment('Уровень пройден! 🎉'); setTimeout(() => backToMenu(), 2000); }
+        if (r.game_over) { comment('Упс! Попробуем снова? 😊'); setTimeout(() => backToMenu(), 2000); }
+    };
+    
+    // Memory
+    window.memoryClick = async function(i) {
+        const cards = document.querySelectorAll('.memory-card');
+        const card = cards[i];
+        if (card.classList.contains('flipped') || card.classList.contains('matched') || state.flipped.length >= 2) return;
+        
+        card.classList.add('flipped');
+        state.flipped.push(i);
+        
+        if (state.flipped.length === 2) {
+            const [a, b] = state.flipped;
+            const r = await action('memory_match', {card1: state.cards[a], card2: state.cards[b]});
+            comment(r.comment);
+            
+            setTimeout(() => {
+                if (r.match) {
+                    cards[a].classList.add('matched');
+                    cards[b].classList.add('matched');
+                    state.matched += 2;
+                    if (state.matched === state.cards.length) {
+                        endGame('lose');
+                    }
+                } else {
+                    cards[a].classList.remove('flipped');
+                    cards[b].classList.remove('flipped');
+                }
+                state.flipped = [];
+            }, 600);
+        }
+    };
+    
+    // Reaction
+    window.startReaction = function() {
+        const t = document.getElementById('rt');
+        t.className = 'reaction-target wait';
+        t.textContent = '⏳';
+        t.onclick = null;
+        document.getElementById('rr').textContent = '';
+        
+        setTimeout(() => {
+            t.className = 'reaction-target go';
+            t.textContent = '🎯';
+            const start = Date.now();
+            t.onclick = async () => {
+                const ms = Date.now() - start;
+                t.className = 'reaction-target';
+                t.textContent = '✓';
+                const r = await action('reaction_result', {time_ms: ms});
+                document.getElementById('rr').textContent = ms + ' мс';
+                comment(r.comment);
+            };
+        }, 1500 + Math.random() * 2500);
+    };
+    
+    async function endGame(result) {
+        await action('game_result', {result});
+        updateStats();
+    }
+    
+    async function updateStats() {
+        const r = await action('get_stats', {});
+        if (r.stats) {
+            document.getElementById('wins').textContent = r.stats.wins || 0;
+            document.getElementById('coop').textContent = r.stats.coop_completed || 0;
+        }
+    }
+    
+    updateStats();
+})();
+</script>

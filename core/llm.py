@@ -1,6 +1,6 @@
 """
-DARIA LLM Provider v0.6.1
-Ollama integration
+DARIA LLM Provider v0.7.4
+Ollama integration with YandexGPT support
 """
 
 import json
@@ -30,6 +30,24 @@ class LLMResponse:
     content: str
     model: str
     tokens_used: int = 0
+
+
+# Поддерживаемые модели
+SUPPORTED_MODELS = {
+    # Ollama модели
+    "llama3.2": {"provider": "ollama", "name": "Llama 3.2"},
+    "llama3.1": {"provider": "ollama", "name": "Llama 3.1"},
+    "mistral": {"provider": "ollama", "name": "Mistral"},
+    "gemma2": {"provider": "ollama", "name": "Gemma 2"},
+    "qwen2.5": {"provider": "ollama", "name": "Qwen 2.5"},
+    
+    # YandexGPT (для Ollama через GGUF)
+    "yandex/YandexGPT-5-Lite-8B-instruct-GGUF": {
+        "provider": "ollama",
+        "name": "YandexGPT 5 Lite",
+        "alias": "yandexgpt"
+    },
+}
 
 
 class OllamaProvider:

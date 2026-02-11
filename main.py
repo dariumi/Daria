@@ -13,7 +13,6 @@ from pathlib import Path
 # Отключаем Flask логи
 import warnings
 warnings.filterwarnings('ignore')
-#os.environ['WERKZEUG_RUN_MAIN'] = 'true'
 
 # ═══════════════════════════════════════════════════════════════════
 #  Version
@@ -52,14 +51,14 @@ def print_banner():
         "",
         f"  {c.PINK}╭{'─'*58}╮{c.END}",
         f"  {c.PINK}│{c.END}                                                          {c.PINK}│{c.END}",
-        f"  {c.PINK}│{c.END}      {c.BOLD}{c.PINK}██████{c.PURPLE}╗  {c.PINK}█████{c.PURPLE}╗ {c.PINK}██████{c.PURPLE}╗ {c.PINK}██{c.PURPLE}╗{c.PINK}█████{c.PURPLE}╗{c.END}        {c.PINK}           │{c.END}",
-        f"  {c.PINK}│{c.END}      {c.BOLD}{c.PINK}██{c.PURPLE}╔══{c.PINK}██{c.PURPLE}╗{c.PINK}██{c.PURPLE}╔══{c.PINK}██{c.PURPLE}╗{c.PINK}██{c.PURPLE}╔══{c.PINK}██{c.PURPLE}╗{c.PINK}██{c.PURPLE}║{c.PINK}██{c.PURPLE}╔══{c.PINK}██{c.PURPLE}╗{c.END}       {c.PINK}          │{c.END}",
-        f"  {c.PINK}│{c.END}      {c.BOLD}{c.PINK}██{c.PURPLE}║  {c.PINK}██{c.PURPLE}║{c.PINK}███████{c.PURPLE}║{c.PINK}██████{c.PURPLE}╔╝{c.PINK}██{c.PURPLE}║{c.PINK}███████{c.PURPLE}║{c.END}       {c.PINK}          │{c.END}",
-        f"  {c.PINK}│{c.END}      {c.BOLD}{c.PURPLE}██{c.PINK}║  {c.PURPLE}██{c.PINK}║{c.PURPLE}██{c.PINK}╔══{c.PURPLE}██{c.PINK}║{c.PURPLE}██{c.PINK}╔══{c.PURPLE}██{c.PINK}╗{c.PURPLE}██{c.PINK}║{c.PURPLE}██{c.PINK}╔══{c.PURPLE}██{c.PINK}║{c.END}       {c.PINK}          │{c.END}",
-        f"  {c.PINK}│{c.END}      {c.BOLD}{c.PURPLE}██████{c.PINK}╔╝{c.PURPLE}██{c.PINK}║  {c.PURPLE}██{c.PINK}║{c.PURPLE}██{c.PINK}║  {c.PURPLE}██{c.PINK}║{c.PURPLE}██{c.PINK}║{c.PURPLE}██{c.PINK}║  {c.PURPLE}██{c.PINK}║{c.END}       {c.PINK}          │{c.END}",
-        f"  {c.PINK}│{c.END}      {c.BOLD}{c.PURPLE}╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═╝{c.END}       {c.PINK}          │{c.END}",
+        f"  {c.PINK}│{c.END}      {c.BOLD}{c.PINK}██████{c.PURPLE}╗  {c.PINK}█████{c.PURPLE}╗ {c.PINK}██████{c.PURPLE}╗ {c.PINK}██{c.PURPLE}╗{c.PINK}█████{c.PURPLE}╗{c.END}        {c.PINK}│{c.END}",
+        f"  {c.PINK}│{c.END}      {c.BOLD}{c.PINK}██{c.PURPLE}╔══{c.PINK}██{c.PURPLE}╗{c.PINK}██{c.PURPLE}╔══{c.PINK}██{c.PURPLE}╗{c.PINK}██{c.PURPLE}╔══{c.PINK}██{c.PURPLE}╗{c.PINK}██{c.PURPLE}║{c.PINK}██{c.PURPLE}╔══{c.PINK}██{c.PURPLE}╗{c.END}       {c.PINK}│{c.END}",
+        f"  {c.PINK}│{c.END}      {c.BOLD}{c.PINK}██{c.PURPLE}║  {c.PINK}██{c.PURPLE}║{c.PINK}███████{c.PURPLE}║{c.PINK}██████{c.PURPLE}╔╝{c.PINK}██{c.PURPLE}║{c.PINK}███████{c.PURPLE}║{c.END}       {c.PINK}│{c.END}",
+        f"  {c.PINK}│{c.END}      {c.BOLD}{c.PURPLE}██{c.PINK}║  {c.PURPLE}██{c.PINK}║{c.PURPLE}██{c.PINK}╔══{c.PURPLE}██{c.PINK}║{c.PURPLE}██{c.PINK}╔══{c.PURPLE}██{c.PINK}╗{c.PURPLE}██{c.PINK}║{c.PURPLE}██{c.PINK}╔══{c.PURPLE}██{c.PINK}║{c.END}       {c.PINK}│{c.END}",
+        f"  {c.PINK}│{c.END}      {c.BOLD}{c.PURPLE}██████{c.PINK}╔╝{c.PURPLE}██{c.PINK}║  {c.PURPLE}██{c.PINK}║{c.PURPLE}██{c.PINK}║  {c.PURPLE}██{c.PINK}║{c.PURPLE}██{c.PINK}║{c.PURPLE}██{c.PINK}║  {c.PURPLE}██{c.PINK}║{c.END}       {c.PINK}│{c.END}",
+        f"  {c.PINK}│{c.END}      {c.BOLD}{c.PURPLE}╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═╝{c.END}       {c.PINK}│{c.END}",
         f"  {c.PINK}│{c.END}                                                          {c.PINK}│{c.END}",
-        f"  {c.PINK}│{c.END}        {c.GRAY}v{VERSION}{c.END}  {c.WHITE}•{c.END}  {c.CYAN} AI Desktop Companion {c.END}  {c.WHITE}•{c.END}  {c.PINK}🌸{c.END}        {c.PINK}  │{c.END}",
+        f"  {c.PINK}│{c.END}        {c.GRAY}v{VERSION}{c.END}  {c.WHITE}•{c.END}  {c.CYAN}AI Desktop Companion{c.END}  {c.WHITE}•{c.END}  {c.PINK}🌸{c.END}        {c.PINK}│{c.END}",
         f"  {c.PINK}│{c.END}                                                          {c.PINK}│{c.END}",
         f"  {c.PINK}╰{'─'*58}╯{c.END}",
         "",
