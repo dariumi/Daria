@@ -1,5 +1,5 @@
 """
-DARIA Memory v0.7.3
+DARIA Memory v0.7.4
 Persistent memory with time awareness
 """
 

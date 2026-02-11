@@ -1,5 +1,5 @@
 """
-DARIA Plugin System v0.7.1
+DARIA Plugin System v0.7.4
 Fixed: catalog download, auto-install from plugins folder
 """
 

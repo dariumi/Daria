@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/dariumi/Daria-Plugins/main/assets/logo.png" alt="DARIA Plugins" width="150"/>
+  <img src="assets/logo.png" alt="DARIA Plugins" width="150"/>
 </p>
 
 <h1 align="center">🧩 DARIA Plugins</h1>
@@ -51,7 +51,7 @@
 
 ## 🔧 Создание плагинов
 
-Хочешь создать свой плагин? Читай [документацию](https://github.com/dariumi/Daria/blob/main/docs/PLUGINS.md)!
+Хочешь создать свой плагин? Читай [документацию](docs/PLUGINS.md)!
 
 ### Структура плагина
 

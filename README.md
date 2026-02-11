@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/dariumi/Daria/main/assets/logo.png" alt="DARIA Logo" width="200"/>
+  <img src="assets/logo.png" alt="DARIA Logo" width="200"/>
 </p>
 
 <h1 align="center">🌸 DARIA</h1>
@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.7.0-pink?style=for-the-badge" alt="Version"/>
+  <img src="https://img.shields.io/badge/version-0.7.4-pink?style=for-the-badge" alt="Version"/>
   <img src="https://img.shields.io/badge/python-3.10+-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="License"/>
   <img src="https://img.shields.io/badge/platform-Windows%20|%20Linux%20|%20macOS-lightgrey?style=for-the-badge" alt="Platform"/>
@@ -29,7 +29,7 @@
 **DARIA** (Desktop AI Reactive Intelligent Assistant) — это виртуальная подруга и умный помощник с красивым веб-интерфейсом в стиле десктопа. Она милая, добрая и всегда рада пообщаться!
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/dariumi/Daria/main/assets/screenshot.png" alt="Screenshot" width="80%"/>
+  <img src="assets/screenshot.png" alt="Screenshot" width="80%"/>
 </p>
 
 ### ✨ Особенности
@@ -209,7 +209,7 @@ MIT License — делай что хочешь, но упоминай автор
 ---
 
 <p align="center">
-  Сделано с 💕 в России
+  Сделано с 💕
 </p>
 
 <p align="center">

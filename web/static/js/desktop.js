@@ -1,5 +1,5 @@
 /**
- * DARIA Desktop v0.7.0
+ * DARIA Desktop v0.7.4
  */
 
 const state = {

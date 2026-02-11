@@ -1,5 +1,5 @@
 """
-DARIA Web App v0.7.0
+DARIA Web App v0.7.4
 Chat history, attention system, improved UI
 """
 
@@ -244,7 +244,7 @@ app = Flask(__name__,
     template_folder=str(Path(__file__).parent / "templates"),
     static_folder=str(Path(__file__).parent / "static")
 )
-app.config['SECRET_KEY'] = 'daria-secret-v0.7.3'
+app.config['SECRET_KEY'] = 'daria-secret-v0.7.4'
 app.config['JSON_AS_ASCII'] = False
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
