@@ -1,5 +1,5 @@
 /**
- * DARIA Desktop v0.7.4
+ * DARIA Desktop v0.8.1
  */
 
 const state = {
@@ -21,6 +21,7 @@ const state = {
 
 const defaultIcons = [
     { id: 'chat', icon: '💬', name: 'Чат', window: 'chat' },
+    { id: 'updater', icon: '⬆️', name: 'Обновления', window: 'updater' },
     { id: 'files', icon: '📁', name: 'Файлы', window: 'files' },
     { id: 'terminal', icon: '💻', name: 'Терминал', window: 'terminal' },
     { id: 'browser', icon: '🌐', name: 'Браузер', window: 'browser' },
@@ -33,6 +34,7 @@ const defaultIcons = [
 
 const windowConfigs = {
     chat: { icon: '💬', title: 'Чат с Дарьей', width: 600, height: 500 },
+    updater: { icon: '⬆️', title: 'Обновления', width: 560, height: 540 },
     files: { icon: '📁', title: 'Файлы', width: 550, height: 400 },
     terminal: { icon: '💻', title: 'Терминал', width: 600, height: 400 },
     browser: { icon: '🌐', title: 'Браузер', width: 800, height: 600 },
@@ -58,6 +60,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     initAvatar();
     await initConnection();
     initNotifications();
+    initProactivePolling();
+    initMoodBehavior();
     checkFirstVisit();
     window.addEventListener('resize', () => { state.isMobile = window.innerWidth < 768; });
 });
@@ -431,11 +435,11 @@ function openWindow(windowId) {
     }
     const config = windowConfigs[windowId];
     if (!config) return;
-    createWindow(windowId, config, () => {
+    const loadPromise = createWindow(windowId, config, () => {
         const tpl = document.getElementById(windowId + '-content');
         return tpl ? tpl.content.cloneNode(true) : null;
     });
-    initWindowContent(windowId);
+    Promise.resolve(loadPromise).then(() => initWindowContent(windowId));
 }
 
 async function openPluginWindow(pluginId) {
@@ -494,13 +498,14 @@ function createWindow(windowId, config, contentFactory) {
             });
         }
     };
-    loadContent();
+    const loadPromise = loadContent();
     
     initWindowEvents(windowEl, windowId);
     document.getElementById('windows-container').appendChild(windowEl);
-    state.windows.set(windowId, {element: windowEl, config});
+    state.windows.set(windowId, {element: windowEl, config, loadPromise});
     addTaskbarItem(windowId, config);
     focusWindow(windowId);
+    return loadPromise;
 }
 
 function initWindowEvents(windowEl, windowId) {
@@ -583,6 +588,7 @@ function addTaskbarItem(windowId, config) {
 
 function initWindowContent(windowId) {
     if (windowId === 'chat') loadChatHistory();
+    else if (windowId === 'updater') initUpdaterWindow();
     else if (windowId === 'settings') initSettingsWindow();
     else if (windowId === 'memory') loadMemoryStats();
     else if (windowId === 'store') loadStore();
@@ -664,12 +670,108 @@ function sendChatMessage() {
     }).then(r => r.json()).then(data => {
         document.getElementById('chat-typing')?.classList.add('hidden');
         if (data.chat_id) state.currentChatId = data.chat_id;
-        addMessage(data.response, 'assistant', 'chat-messages');
+        
+        // Multi-message support (Point #12)
+        const messages = data.messages || [data.response];
+        displaySequentialMessages(messages, 'chat-messages');
+        
         loadChatHistory();
     }).catch(() => {
         document.getElementById('chat-typing')?.classList.add('hidden');
         addMessage('Ошибка соединения... 💔', 'assistant', 'chat-messages');
     });
+}
+
+function displaySequentialMessages(messages, containerId) {
+    if (!messages || messages.length === 0) return;
+    
+    // First message immediately
+    addMessage(messages[0], 'assistant', containerId);
+    
+    // Subsequent messages with delay (simulates typing)
+    for (let i = 1; i < messages.length; i++) {
+        ((msg, delay) => {
+            setTimeout(() => addMessage(msg, 'assistant', containerId), delay);
+        })(messages[i], i * (800 + messages[i].length * 15));
+    }
+}
+
+// Proactive messaging - Daria initiates chats (Point #6)
+function initProactivePolling() {
+    setInterval(async () => {
+        try {
+            const r = await fetch('/api/proactive');
+            const data = await r.json();
+            if (data.messages && data.messages.length > 0) {
+                for (const proactive of data.messages) {
+                    handleProactiveMessage(proactive);
+                }
+            }
+        } catch (e) {}
+    }, 30000); // Check every 30 seconds
+}
+
+function handleProactiveMessage(proactive) {
+    const msgs = proactive.messages || [];
+    if (!msgs.length) return;
+    
+    // Show notification
+    showNotification({
+        title: '🌸 Дарья',
+        message: msgs[0],
+        type: 'proactive',
+        icon: '💬',
+        duration: 15000,
+        action: 'open_chat',
+        system: true,
+    });
+    
+    // If chat window is open, inject messages
+    const chatContainer = document.getElementById('chat-messages');
+    if (chatContainer) {
+        displaySequentialMessages(msgs, 'chat-messages');
+    }
+    
+    // If it's a game suggestion, also hint on desktop
+    if (proactive.type === 'game_suggest') {
+        const avatar = document.querySelector('.avatar-image');
+        if (avatar) {
+            avatar.classList.add('wants-play');
+            setTimeout(() => avatar.classList.remove('wants-play'), 10000);
+        }
+    }
+}
+
+// Mood-driven desktop behavior (Point #7)
+function initMoodBehavior() {
+    setInterval(async () => {
+        try {
+            const r = await fetch('/api/behavior');
+            const data = await r.json();
+            const behavior = data.behavior || {};
+            
+            if (behavior.desktop_mischief) {
+                performDesktopMischief(data.state?.mood);
+            }
+        } catch (e) {}
+    }, 60000); // Check every minute
+}
+
+function performDesktopMischief(mood) {
+    if (mood === 'angry' || mood === 'offended' || mood === 'playful') {
+        // Move random desktop icons
+        const icons = document.querySelectorAll('.desktop-icon');
+        if (icons.length > 0 && !state.isMobile) {
+            const randomIcon = icons[Math.floor(Math.random() * icons.length)];
+            const newX = Math.random() * (window.innerWidth - 200);
+            const newY = Math.random() * (window.innerHeight - 200);
+            randomIcon.style.position = 'absolute';
+            randomIcon.style.left = newX + 'px';
+            randomIcon.style.top = newY + 'px';
+            randomIcon.style.transition = 'all 0.5s ease';
+            setTimeout(() => randomIcon.style.transition = '', 600);
+        }
+    }
 }
 
 function sendQuickMessage() {
@@ -701,7 +803,9 @@ function addMessage(content, role, containerId) {
 async function loadFiles(path = "") {
     state.currentPath = path;
     const list = document.getElementById('files-list');
-    document.getElementById('files-path').textContent = '/' + path;
+    const pathEl = document.getElementById('files-path');
+    if (!list || !pathEl) return;
+    pathEl.textContent = '/' + path;
     list.innerHTML = '<div class="loading">Загрузка...</div>';
     
     try {
@@ -914,8 +1018,10 @@ async function showPluginDetails(id) {
         const modal = document.createElement('div');
         modal.className = 'modal';
         modal.innerHTML = `<div class="modal-content"><div class="modal-header"><h2>${p.icon} ${p.name}</h2></div>
-            <div class="modal-body"><p>${p.description}</p><p><small>v${p.version} • ${p.author}</small></p></div>
+            <div class="modal-body"><p>${p.description}</p><p><small>v${p.version} • ${p.author}</small></p>
+            ${p.update_available ? `<p><small>Доступно обновление: v${p.latest_version}</small></p>` : ''}</div>
             <div class="modal-footer">
+                ${p.installed && p.update_available ? `<button class="btn-primary" onclick="updatePlugin('${id}',this)">Обновить</button>` : ''}
                 ${p.installed?`<button class="btn-danger" onclick="uninstallPlugin('${id}',this)">Удалить</button>`:`<button class="btn-primary" onclick="installPlugin('${id}',this)">Установить</button>`}
                 <button onclick="this.closest('.modal').remove()">Закрыть</button>
             </div></div>`;
@@ -926,7 +1032,138 @@ async function showPluginDetails(id) {
 
 async function installPlugin(id, btn) { btn.disabled=true; await fetch(`/api/plugins/${id}/install`,{method:'POST'}); btn.closest('.modal')?.remove(); await loadPlugins(); initDesktopIcons(); loadStore(); }
 async function uninstallPlugin(id, btn) { if(!confirm('Удалить?'))return; await fetch(`/api/plugins/${id}/uninstall`,{method:'POST'}); btn.closest('.modal')?.remove(); await loadPlugins(); initDesktopIcons(); loadStore(); }
+async function updatePlugin(id, btn) { btn.disabled=true; await fetch(`/api/plugins/${id}/update`,{method:'POST'}); btn.closest('.modal')?.remove(); await loadPlugins(); initDesktopIcons(); loadStore(); }
 function refreshStore() { loadStore(); }
+
+// ═══════════════════════════════════════════════════════════════
+//  Updater
+// ═══════════════════════════════════════════════════════════════
+
+async function initUpdaterWindow() {
+    await updaterLoadState();
+    await updaterCheck();
+    await updaterLoadPluginUpdates();
+}
+
+async function updaterLoadState() {
+    try {
+        const autoResp = await fetch('/api/update/auto');
+        const autoData = await autoResp.json();
+        const autoEl = document.getElementById('updater-auto');
+        if (autoEl) autoEl.checked = !!autoData.auto_update;
+
+        const r = await fetch('/api/update/state');
+        const s = await r.json();
+        const el = document.getElementById('updater-state');
+        if (el) {
+            el.textContent = s.running ? 'Обновление выполняется...' : `Текущая версия: v${s.version || '—'}`;
+        }
+    } catch (e) {}
+}
+
+async function updaterToggleAuto(input) {
+    try {
+        await fetch('/api/update/auto', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({auto_update: !!input?.checked}),
+        });
+    } catch (e) {}
+}
+
+async function updaterCheck() {
+    const repo = document.getElementById('updater-repo')?.value || 'dariumi/Daria';
+    const ref = document.getElementById('updater-ref')?.value || 'main';
+    const out = document.getElementById('updater-core-info');
+    if (out) out.textContent = 'Проверка...';
+    try {
+        const r = await fetch(`/api/update/check?source=github&repo=${encodeURIComponent(repo)}&ref=${encodeURIComponent(ref)}`);
+        const data = await r.json();
+        if (!out) return;
+        out.textContent = `Текущая: v${data.current} • Доступно: v${data.latest}${data.update_available ? ' (есть обновление)' : ''}`;
+    } catch (e) {
+        if (out) out.textContent = 'Ошибка проверки';
+    }
+}
+
+async function updaterRunGithub() {
+    const repo = document.getElementById('updater-repo')?.value || 'dariumi/Daria';
+    const ref = document.getElementById('updater-ref')?.value || 'main';
+    const out = document.getElementById('updater-core-info');
+    if (out) out.textContent = 'Обновляю из GitHub...';
+    try {
+        const r = await fetch('/api/update/from-github', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({repo, ref}),
+        });
+        const data = await r.json();
+        if (data.status === 'ok') out.textContent = `Готово. Версия: v${data.version}. Нужен перезапуск.`;
+        else out.textContent = `Ошибка: ${data.error || 'неизвестно'}`;
+    } catch (e) {
+        if (out) out.textContent = 'Ошибка обновления';
+    }
+}
+
+async function updaterRunArchive() {
+    const archivePath = document.getElementById('updater-archive-path')?.value?.trim();
+    const out = document.getElementById('updater-core-info');
+    if (!archivePath) {
+        if (out) out.textContent = 'Укажи путь к архиву';
+        return;
+    }
+    if (out) out.textContent = 'Обновляю из архива...';
+    try {
+        const r = await fetch('/api/update/from-archive', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({archive_path: archivePath}),
+        });
+        const data = await r.json();
+        if (data.status === 'ok') out.textContent = `Готово. Версия: v${data.version}. Нужен перезапуск.`;
+        else out.textContent = `Ошибка: ${data.error || 'неизвестно'}`;
+    } catch (e) {
+        if (out) out.textContent = 'Ошибка обновления';
+    }
+}
+
+async function updaterLoadPluginUpdates() {
+    const el = document.getElementById('updater-plugin-updates');
+    if (!el) return;
+    el.innerHTML = '<div class="loading">Проверка...</div>';
+    try {
+        const r = await fetch('/api/plugins/updates');
+        const updates = await r.json();
+        if (!Array.isArray(updates) || updates.length === 0) {
+            el.innerHTML = '<div class="empty">Плагины обновлены</div>';
+            return;
+        }
+        el.innerHTML = updates.map(u => `
+            <div class="plugin-card">
+                <span class="plugin-icon">🧩</span>
+                <div class="plugin-info"><b>${u.name || u.id}</b><span>v${u.current_version} → v${u.latest_version}</span></div>
+                <button onclick="updaterUpdatePlugin('${u.id}', this)">Обновить</button>
+            </div>
+        `).join('');
+    } catch (e) {
+        el.innerHTML = '<div class="empty">Ошибка загрузки</div>';
+    }
+}
+
+async function updaterUpdatePlugin(id, btn) {
+    btn.disabled = true;
+    await fetch(`/api/plugins/${id}/update`, {method: 'POST'});
+    await loadPlugins();
+    initDesktopIcons();
+    updaterLoadPluginUpdates();
+}
+
+async function updaterUpdateAllPlugins() {
+    await fetch('/api/plugins/update-all', {method: 'POST'});
+    await loadPlugins();
+    initDesktopIcons();
+    updaterLoadPluginUpdates();
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  Start Menu & Welcome

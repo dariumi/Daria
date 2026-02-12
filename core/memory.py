@@ -1,5 +1,5 @@
 """
-DARIA Memory v0.7.4
+DARIA Memory v0.8.1
 Persistent memory with time awareness
 """
 
@@ -149,7 +149,9 @@ class WorkingMemory:
         recent = self.turns[-5:]
         summary_parts = []
         for turn in recent:
-            summary_parts.append(f"Пользователь: {turn.user_message[:50]}...")
+            u = turn.user_message.replace("\n", " ").strip()[:90]
+            a = turn.assistant_response.replace("\n", " ").strip()[:90]
+            summary_parts.append(f"Пользователь: {u} | Даша: {a}")
         return " | ".join(summary_parts)
     
     def clear(self):

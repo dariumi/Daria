@@ -1,5 +1,5 @@
 """
-DARIA Actions v0.7.4
+DARIA Actions v0.6.1
 System actions and tool execution
 """
 

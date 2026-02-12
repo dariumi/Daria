@@ -141,6 +141,7 @@ class VoiceCallPlugin(DariaPlugin):
             return {"status": "ok"}
         
         # Подсчитать длительность
+        duration = 0
         if self.call_start_time:
             duration = (datetime.now() - self.call_start_time).total_seconds()
             self.stats["total_duration"] += int(duration)
@@ -160,7 +161,7 @@ class VoiceCallPlugin(DariaPlugin):
             "status": "disconnected",
             "farewell": farewell,
             "farewell_audio": self._text_to_speech(farewell) if self.tts_available else None,
-            "duration": duration if self.call_start_time else 0,
+            "duration": int(duration),
         }
     
     def _get_status(self) -> Dict[str, Any]:

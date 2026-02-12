@@ -7,6 +7,7 @@
     <div class="training-tabs">
         <button class="tab active" onclick="showTab('examples')">Примеры</button>
         <button class="tab" onclick="showTab('style')">Стиль</button>
+        <button class="tab" onclick="showTab('skills')">Навыки</button>
         <button class="tab" onclick="showTab('add')">Добавить</button>
     </div>
     
@@ -31,6 +32,19 @@
             <input type="text" id="prefer-phrases" placeholder="фраза1, фраза2...">
         </div>
         <button class="btn-primary" onclick="saveStyle()">💾 Сохранить стиль</button>
+    </div>
+
+    <div class="tab-content hidden" id="tab-skills">
+        <div class="form-group">
+            <label>Новый навык</label>
+            <input type="text" id="new-skill-name" placeholder="Например: 3D-скульптинг">
+        </div>
+        <div class="form-group">
+            <label>Описание навыка</label>
+            <textarea id="new-skill-description" placeholder="Что именно умеет Даша в этой теме"></textarea>
+        </div>
+        <button class="btn-primary" onclick="addSkill()">➕ Добавить навык</button>
+        <div class="examples-list" id="skills-list" style="margin-top:12px"></div>
     </div>
     
     <div class="tab-content hidden" id="tab-add">
@@ -93,6 +107,7 @@
     let categories = {};
     let examples = {};
     let style = {};
+    let skills = [];
     
     async function action(act, data = {}) {
         const r = await fetch('/api/plugins/training/action', {
@@ -117,6 +132,7 @@
         categories = data.data?.categories || {};
         examples = data.data?.examples || {};
         style = data.data?.style || {};
+        skills = data.data?.skills || [];
         
         // Fill category selects
         const filter = document.getElementById('category-filter');
@@ -134,6 +150,7 @@
         
         updateCount();
         loadExamples();
+        renderSkills();
     }
     
     function updateCount() {
@@ -215,6 +232,42 @@
         });
         
         alert('Стиль сохранён! 💕');
+    };
+
+    window.renderSkills = function() {
+        const list = document.getElementById('skills-list');
+        if (!list) return;
+        if (!skills.length) {
+            list.innerHTML = '<div class="empty-state">Навыков пока нет</div>';
+            return;
+        }
+        list.innerHTML = skills.map((s, i) => `
+            <div class="example-item">
+                <div class="example-input">🎯 ${s.name}</div>
+                <div class="example-output">${s.description}</div>
+                <button class="example-delete" onclick="deleteSkill(${i})">🗑️</button>
+            </div>
+        `).join('');
+    };
+
+    window.addSkill = async function() {
+        const name = document.getElementById('new-skill-name').value.trim();
+        const description = document.getElementById('new-skill-description').value.trim();
+        const result = await action('add_skill', {name, description});
+        if (result.error) {
+            alert(result.error);
+            return;
+        }
+        skills.push({name, description});
+        document.getElementById('new-skill-name').value = '';
+        document.getElementById('new-skill-description').value = '';
+        renderSkills();
+    };
+
+    window.deleteSkill = async function(index) {
+        await action('delete_skill', {index});
+        skills = skills.filter((_, i) => i !== index);
+        renderSkills();
     };
     
     window.exportData = async function() {

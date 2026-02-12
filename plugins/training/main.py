@@ -40,12 +40,18 @@ class TrainingPlugin(DariaPlugin):
             "preferred_phrases": [],
             "notes": "",
         })
+        self.skills = self.api.load_data("skills", [
+            {"name": "3D-скульптинг", "description": "Понимаю базовые этапы от блокаута до детализации и ретопологии."},
+            {"name": "Цифровой рисунок", "description": "Могу помогать с композицией, цветом, светом и пайплайном рисунка."},
+            {"name": "Креативные идеи", "description": "Генерирую концепты, референс-планы и пошаговые задания."},
+        ])
     
     def on_window_open(self) -> Dict[str, Any]:
         return {
             "categories": self.CATEGORIES,
             "examples": self.examples,
             "style": self.style_notes,
+            "skills": self.skills,
             "total": sum(len(v) for v in self.examples.values()),
         }
     
@@ -96,6 +102,23 @@ class TrainingPlugin(DariaPlugin):
             self.api.save_data("style", self.style_notes)
             return {"status": "ok"}
         
+        elif action == "add_skill":
+            name = (data.get("name") or "").strip()
+            description = (data.get("description") or "").strip()
+            if not name or not description:
+                return {"error": "Укажи название и описание навыка"}
+            self.skills.append({"name": name, "description": description})
+            self.api.save_data("skills", self.skills)
+            return {"status": "ok"}
+
+        elif action == "delete_skill":
+            index = data.get("index")
+            if isinstance(index, int) and 0 <= index < len(self.skills):
+                del self.skills[index]
+                self.api.save_data("skills", self.skills)
+                return {"status": "ok"}
+            return {"error": "Skill not found"}
+        
         elif action == "export":
             return {
                 "data": {
@@ -121,6 +144,7 @@ class TrainingPlugin(DariaPlugin):
     
     def _save(self):
         self.api.save_data("examples", self.examples)
+        self.api.save_data("skills", self.skills)
     
     def get_training_context(self) -> str:
         """Get training context for LLM prompt"""
@@ -137,6 +161,11 @@ class TrainingPlugin(DariaPlugin):
         if self.style_notes.get("preferred_phrases"):
             prefer = ", ".join(self.style_notes["preferred_phrases"])
             context_parts.append(f"ИСПОЛЬЗУЙ ФРАЗЫ: {prefer}")
+
+        if self.skills:
+            context_parts.append("\n═══ НАВЫКИ ДАШИ ═══")
+            for skill in self.skills[-12:]:
+                context_parts.append(f"- {skill.get('name')}: {skill.get('description')}")
         
         # Examples
         for category, examples in self.examples.items():

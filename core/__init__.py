@@ -1,10 +1,10 @@
 """
 ╔═══════════════════════════════════════════════════════════════════╗
-║  DARIA Core v0.7.4                                                ║
+║  DARIA Core v0.8.1                                                ║
 ╚═══════════════════════════════════════════════════════════════════╝
 """
 
-__version__ = "0.7.4"
+__version__ = "0.8.1"
 
 from .config import get_config, DariaConfig
 from .llm import LLMManager, get_llm

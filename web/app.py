@@ -1,6 +1,6 @@
 """
-DARIA Web App v0.7.4
-Chat history, attention system, improved UI
+DARIA Web App v0.8.1
+Chat history, attention system, proactive messaging, mood behaviors
 """
 
 import os
@@ -10,6 +10,10 @@ import queue
 import threading
 import shutil
 import time
+import tempfile
+import tarfile
+import zipfile
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
@@ -187,21 +191,59 @@ class ChatHistoryManager:
 # ═══════════════════════════════════════════════════════════════════
 
 class AttentionThread(threading.Thread):
+    """Attention + Proactive messaging thread"""
     def __init__(self, notifications: NotificationManager):
         super().__init__(daemon=True)
         self.notifications = notifications
         self.enabled = True
         self.running = True
         self._brain = None
+        self._proactive_queue: List[Dict] = []
     
     def run(self):
+        tick = 0
         while self.running:
-            time.sleep(60)
-            if self.enabled and self._brain:
-                try:
-                    attention = self._brain.attention.check_attention_needed()
+            time.sleep(30)
+            tick += 1
+            if not self.enabled or not self._brain:
+                continue
+            
+            try:
+                # Check proactive messaging every 2 minutes (Point #6)
+                if tick % 4 == 0:
+                    proactive = self._brain.check_proactive()
+                    if proactive:
+                        msgs = proactive.get("messages", [])
+                        for msg in msgs:
+                            self.notifications.add(
+                                title="🌸 Дарья",
+                                message=msg,
+                                type="proactive",
+                                icon="💬",
+                                duration=20000,
+                                action="open_chat",
+                                system=True
+                            )
+                        # Store for chat injection
+                        self._proactive_queue.append(proactive)
+                        
+                        try:
+                            from plyer import notification as plyer_notif
+                            plyer_notif.notify(
+                                title="🌸 Дарья",
+                                message=msgs[0] if msgs else "Привет!",
+                                app_name="DARIA",
+                                timeout=10
+                            )
+                        except:
+                            pass
+                        continue
+                
+                # Check attention every minute
+                if tick % 2 == 0:
+                    # Use check_needed (fixed method)
+                    attention = self._brain.attention.check_needed()
                     if attention:
-                        # Send in-app notification
                         self.notifications.add(
                             title="🌸 Дарья",
                             message=attention["message"],
@@ -212,7 +254,6 @@ class AttentionThread(threading.Thread):
                             system=True
                         )
                         
-                        # Send OS notification via plyer
                         try:
                             from plyer import notification as plyer_notif
                             plyer_notif.notify(
@@ -223,9 +264,29 @@ class AttentionThread(threading.Thread):
                             )
                         except:
                             pass
-                            
-                except Exception as e:
-                    logger.debug(f"Attention error: {e}")
+
+                # Mood-based behavior check (Point #7)
+                if tick % 6 == 0:
+                    behavior = self._brain.mood.get_behavior_hints()
+                    if behavior.get("desktop_mischief"):
+                        self.notifications.add(
+                            title="🌸 Дарья",
+                            message="desktop_action",
+                            type="mood_action",
+                            icon="😤",
+                            duration=1000,
+                            action="desktop_mischief",
+                            system=False
+                        )
+                        
+            except Exception as e:
+                logger.debug(f"Attention error: {e}")
+    
+    def get_proactive_messages(self) -> List[Dict]:
+        """Get and clear queued proactive messages"""
+        msgs = list(self._proactive_queue)
+        self._proactive_queue.clear()
+        return msgs
     
     def set_brain(self, brain):
         self._brain = brain
@@ -238,13 +299,13 @@ class AttentionThread(threading.Thread):
 #  Flask App
 # ═══════════════════════════════════════════════════════════════════
 
-VERSION = "0.7.4"
+VERSION = "0.8.1"
 
 app = Flask(__name__,
     template_folder=str(Path(__file__).parent / "templates"),
     static_folder=str(Path(__file__).parent / "static")
 )
-app.config['SECRET_KEY'] = 'daria-secret-v0.7.4'
+app.config['SECRET_KEY'] = 'daria-secret-v0.8.1'
 app.config['JSON_AS_ASCII'] = False
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
@@ -253,6 +314,7 @@ DATA_DIR = Path.home() / ".daria"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 UPLOADS_DIR = DATA_DIR / "uploads"
 FILES_DIR = DATA_DIR / "files"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 FILES_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -266,6 +328,9 @@ attention_thread = AttentionThread(notifications)
 _brain = None
 _memory = None
 _plugins = None
+
+_status_cache: Dict[str, Any] = {"ts": 0.0, "data": None}
+_update_state: Dict[str, Any] = {"running": False, "last_error": None, "last_action": None, "last_check": None}
 
 
 def get_brain():
@@ -323,6 +388,77 @@ def save_settings(data: Dict[str, Any]):
         attention_thread.enabled = data["attention_enabled"]
 
 
+def _version_key(version: str) -> List[int]:
+    nums = [int(x) for x in re.findall(r"\d+", str(version or ""))]
+    return nums if nums else [0]
+
+
+def _read_version(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except Exception:
+        return "0.0.0"
+
+
+def _download_github_archive(repo: str, ref: str = "main") -> bytes:
+    try:
+        import requests
+    except Exception as e:
+        raise RuntimeError(f"requests unavailable: {e}")
+
+    repo = (repo or "").strip().strip("/")
+    if repo.startswith("https://github.com/"):
+        repo = repo.replace("https://github.com/", "", 1)
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    if repo.count("/") != 1:
+        raise ValueError("repo must look like owner/name")
+
+    url = f"https://codeload.github.com/{repo}/zip/refs/heads/{ref or 'main'}"
+    response = requests.get(url, timeout=60)
+    if response.status_code != 200:
+        raise RuntimeError(f"download failed: {response.status_code}")
+    return response.content
+
+
+def _extract_archive_to_dir(archive_path: Path, out_dir: Path):
+    out_dir.mkdir(parents=True, exist_ok=True)
+    suffixes = "".join(archive_path.suffixes[-2:]).lower()
+    if archive_path.suffix.lower() == ".zip":
+        with zipfile.ZipFile(archive_path) as zf:
+            zf.extractall(out_dir)
+        return
+    if suffixes in (".tar.gz", ".tgz") or archive_path.suffix.lower() == ".tar":
+        with tarfile.open(archive_path, "r:*") as tf:
+            tf.extractall(out_dir)
+        return
+    raise ValueError("unsupported archive format")
+
+
+def _find_project_root(extracted_dir: Path) -> Path:
+    candidates = [p for p in extracted_dir.rglob("VERSION") if p.is_file()]
+    for version_file in candidates:
+        root = version_file.parent
+        if (root / "main.py").exists() and (root / "web").exists():
+            return root
+    raise RuntimeError("project root not found in archive")
+
+
+def _sync_project_tree(src: Path, dst: Path):
+    skip = {".git", "venv", "__pycache__", ".pytest_cache", ".mypy_cache"}
+    for item in src.iterdir():
+        if item.name in skip:
+            continue
+        target = dst / item.name
+        if item.is_dir():
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(item, target)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, target)
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  Routes
 # ═══════════════════════════════════════════════════════════════════
@@ -334,13 +470,31 @@ def index():
 
 @app.route("/api/status")
 def api_status():
-    return jsonify({
+    now_ts = time.time()
+    cached = _status_cache.get("data")
+    if cached and now_ts - _status_cache.get("ts", 0.0) < 5:
+        return jsonify(cached)
+
+    brain = get_brain()
+    memory = get_memory()
+    plugins = get_plugins()
+    llm_status = {}
+    if brain and getattr(brain, "_llm", None):
+        try:
+            llm_status = brain._llm.check_availability()
+        except Exception as e:
+            llm_status = {"available": False, "error": str(e)}
+
+    data = {
         "version": VERSION,
-        "brain": get_brain() is not None,
-        "memory": get_memory() is not None,
-        "plugins": get_plugins() is not None,
-        "llm": get_brain()._llm.check_availability() if get_brain() and get_brain()._llm else {}
-    })
+        "brain": brain is not None,
+        "memory": memory is not None,
+        "plugins": plugins is not None,
+        "llm": llm_status,
+    }
+    _status_cache["ts"] = now_ts
+    _status_cache["data"] = data
+    return jsonify(data)
 
 
 @app.route("/api/state")
@@ -464,24 +618,46 @@ def api_chat():
         return jsonify({"response": "Система загружается... 💭", "thinking": None})
     
     try:
-        # Create chat if needed
         if not chat_id:
             chat_id = chat_history.create_chat()
         
-        # Save user message
         chat_history.add_message(chat_id, "user", content)
-        
-        # Get response
         result = brain.process_message(content)
         
-        # Save assistant message
+        # Save main response
         chat_history.add_message(chat_id, "assistant", result["response"])
         
         result["chat_id"] = chat_id
+        # Include messages list for multi-message display (Point #12)
+        if "messages" not in result:
+            result["messages"] = [result["response"], *(result.get("extra_messages") or [])]
+        
         return jsonify(result)
     except Exception as e:
         logger.error(f"Chat error: {e}")
         return jsonify({"response": "Ой, что-то пошло не так... 💔", "thinking": None})
+
+
+@app.route("/api/proactive")
+def api_proactive():
+    """Get queued proactive messages from Daria (Point #6)"""
+    messages = attention_thread.get_proactive_messages()
+    return jsonify({"messages": messages})
+
+
+@app.route("/api/behavior")
+def api_behavior():
+    """Get current behavior hints for desktop actions (Point #7)"""
+    brain = get_brain()
+    if brain:
+        try:
+            behavior = brain.mood.get_behavior_hints()
+            state = brain.get_state()
+            return jsonify({"behavior": behavior, "state": state})
+        except Exception as e:
+            logger.error(f"Behavior error: {e}")
+            return jsonify({"behavior": {}, "state": {}}), 200
+    return jsonify({"behavior": {}, "state": {}})
 
 
 @app.route("/api/chats")
@@ -539,7 +715,7 @@ def api_attention_trigger():
     """Manually trigger attention (for testing)"""
     brain = get_brain()
     if brain:
-        msg = brain.generate_attention_message()
+        msg = brain.attention.generate_message()
         if msg:
             notifications.add("🌸 Дарья", msg, "attention", "💕", 10000, "open_chat")
             return jsonify({"message": msg})
@@ -791,6 +967,14 @@ def api_plugin_info(plugin_id):
         return jsonify({"error": "unavailable"}), 500
     info = plugins.get_plugin_info(plugin_id)
     if info:
+        for upd in plugins.check_plugin_updates():
+            if upd.get("id") == plugin_id:
+                info["update_available"] = True
+                info["latest_version"] = upd.get("latest_version")
+                break
+        else:
+            info["update_available"] = False
+            info["latest_version"] = info.get("version")
         return jsonify(info)
     for item in plugins.fetch_catalog():
         if item.get("id") == plugin_id:
@@ -805,6 +989,37 @@ def api_plugin_install(plugin_id):
         notifications.add("Плагин", f"{plugin_id} установлен", "success", "🧩")
         return jsonify({"status": "ok"})
     return jsonify({"error": "Failed"}), 500
+
+
+@app.route("/api/plugins/updates")
+def api_plugins_updates():
+    plugins = get_plugins()
+    if not plugins:
+        return jsonify([])
+    try:
+        return jsonify(plugins.check_plugin_updates())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/plugins/<plugin_id>/update", methods=["POST"])
+def api_plugin_update(plugin_id):
+    plugins = get_plugins()
+    if plugins and plugins.update_plugin(plugin_id):
+        notifications.add("Плагин", f"{plugin_id} обновлён", "success", "🧩")
+        return jsonify({"status": "ok"})
+    return jsonify({"error": "Failed"}), 500
+
+
+@app.route("/api/plugins/update-all", methods=["POST"])
+def api_plugins_update_all():
+    plugins = get_plugins()
+    if not plugins:
+        return jsonify({"error": "unavailable"}), 500
+    try:
+        return jsonify({"status": "ok", **plugins.update_all_plugins()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/plugins/<plugin_id>/uninstall", methods=["POST"])
@@ -841,6 +1056,125 @@ def plugin_template(plugin_id, filename):
     from core.config import get_config
     path = get_config().data_dir / "plugins" / plugin_id / "templates" / filename
     return path.read_text() if path.exists() else abort(404)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Updater
+# ═══════════════════════════════════════════════════════════════════
+
+@app.route("/api/update/check")
+def api_update_check():
+    source = request.args.get("source", "github")
+    repo = request.args.get("repo", "dariumi/Daria")
+    ref = request.args.get("ref", "main")
+    current = _read_version(PROJECT_ROOT / "VERSION")
+    latest = current
+    update_available = False
+
+    if source == "github":
+        try:
+            try:
+                import requests
+                api_url = f"https://api.github.com/repos/{repo.strip('/')}/releases/latest"
+                r = requests.get(api_url, timeout=15)
+                if r.status_code == 200:
+                    latest = str((r.json().get("tag_name") or "").lstrip("v") or current)
+                else:
+                    tags_url = f"https://api.github.com/repos/{repo.strip('/')}/tags"
+                    r2 = requests.get(tags_url, timeout=15)
+                    if r2.status_code == 200 and r2.json():
+                        latest = str(r2.json()[0].get("name", "")).lstrip("v") or current
+            except Exception:
+                latest = current
+            update_available = _version_key(latest) > _version_key(current)
+        except Exception as e:
+            return jsonify({"error": str(e), "current": current, "latest": current, "update_available": False}), 200
+
+    _update_state["last_check"] = datetime.now().isoformat()
+    return jsonify({
+        "current": current,
+        "latest": latest,
+        "update_available": update_available,
+        "source": source,
+        "repo": repo,
+        "ref": ref,
+    })
+
+
+@app.route("/api/update/auto", methods=["GET", "POST"])
+def api_update_auto():
+    settings = load_settings()
+    if request.method == "GET":
+        return jsonify({"auto_update": settings.get("auto_update", False)})
+    data = request.get_json() or {}
+    enabled = bool(data.get("auto_update", False))
+    save_settings({"auto_update": enabled})
+    return jsonify({"status": "ok", "auto_update": enabled})
+
+
+@app.route("/api/update/from-github", methods=["POST"])
+def api_update_from_github():
+    if _update_state.get("running"):
+        return jsonify({"error": "update already running"}), 409
+    data = request.get_json() or {}
+    repo = data.get("repo", "dariumi/Daria")
+    ref = data.get("ref", "main")
+    _update_state["running"] = True
+    _update_state["last_error"] = None
+    _update_state["last_action"] = f"github:{repo}@{ref}"
+    try:
+        archive = _download_github_archive(repo, ref)
+        with tempfile.TemporaryDirectory(prefix="daria-update-") as td:
+            archive_path = Path(td) / "update.zip"
+            archive_path.write_bytes(archive)
+            extracted = Path(td) / "extracted"
+            _extract_archive_to_dir(archive_path, extracted)
+            src_root = _find_project_root(extracted)
+            _sync_project_tree(src_root, PROJECT_ROOT)
+        new_version = _read_version(PROJECT_ROOT / "VERSION")
+        notifications.add("Обновление", f"Система обновлена до v{new_version}", "success", "⬆️", 10000)
+        return jsonify({"status": "ok", "version": new_version, "restart_required": True})
+    except Exception as e:
+        _update_state["last_error"] = str(e)
+        return jsonify({"error": str(e)}), 500
+    finally:
+        _update_state["running"] = False
+
+
+@app.route("/api/update/from-archive", methods=["POST"])
+def api_update_from_archive():
+    if _update_state.get("running"):
+        return jsonify({"error": "update already running"}), 409
+    data = request.get_json() or {}
+    archive_path = Path((data.get("archive_path") or "").strip()).expanduser()
+    if not archive_path.exists():
+        return jsonify({"error": "archive not found"}), 400
+
+    _update_state["running"] = True
+    _update_state["last_error"] = None
+    _update_state["last_action"] = f"archive:{archive_path}"
+    try:
+        with tempfile.TemporaryDirectory(prefix="daria-update-") as td:
+            extracted = Path(td) / "extracted"
+            _extract_archive_to_dir(archive_path, extracted)
+            src_root = _find_project_root(extracted)
+            _sync_project_tree(src_root, PROJECT_ROOT)
+        new_version = _read_version(PROJECT_ROOT / "VERSION")
+        notifications.add("Обновление", f"Система обновлена до v{new_version}", "success", "⬆️", 10000)
+        return jsonify({"status": "ok", "version": new_version, "restart_required": True})
+    except Exception as e:
+        _update_state["last_error"] = str(e)
+        return jsonify({"error": str(e)}), 500
+    finally:
+        _update_state["running"] = False
+
+
+@app.route("/api/update/state")
+def api_update_state():
+    return jsonify({
+        **_update_state,
+        "version": _read_version(PROJECT_ROOT / "VERSION"),
+    })
 
 
 # ═══════════════════════════════════════════════════════════════════

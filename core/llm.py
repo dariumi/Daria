@@ -1,5 +1,5 @@
 """
-DARIA LLM Provider v0.7.4
+DARIA LLM Provider v0.8.1
 Ollama integration with YandexGPT support
 """
 

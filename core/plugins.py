@@ -1,5 +1,5 @@
 """
-DARIA Plugin System v0.7.4
+DARIA Plugin System v0.8.1
 Fixed: catalog download, auto-install from plugins folder
 """
 
@@ -13,6 +13,7 @@ import importlib.util
 import subprocess
 import zipfile
 import tempfile
+import re
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Callable, TYPE_CHECKING
@@ -199,6 +200,62 @@ class PluginAPI:
             except:
                 pass
         return self._memory
+
+    def get_user_profile(self) -> Dict[str, Any]:
+        memory = self.get_memory()
+        return memory.get_user_profile() if memory else {}
+
+    def set_user_profile(self, key: str, value: str):
+        memory = self.get_memory()
+        if memory:
+            memory.set_user_profile(key, value)
+
+    def remember(self, content: str, importance: float = 0.5) -> Optional[str]:
+        memory = self.get_memory()
+        if memory:
+            return memory.remember(content, importance=importance)
+        return None
+
+    def store_fact(self, key: str, value: str):
+        memory = self.get_memory()
+        if memory:
+            memory.set_user_profile(key, value)
+
+    def recall(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        memory = self.get_memory()
+        if not memory:
+            return []
+        return [m.to_dict() for m in memory.recall(query, limit=limit)]
+
+    def add_to_conversation(self, user_message: str, assistant_response: str, emotion: str = "neutral"):
+        memory = self.get_memory()
+        if memory:
+            memory.add_exchange(user_message, assistant_response, emotion)
+
+    def get_data_path(self) -> Path:
+        return self.data_dir
+
+    def generate(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
+        if self._llm is None:
+            try:
+                from .llm import get_llm
+                self._llm = get_llm()
+            except Exception:
+                return {"error": "LLM unavailable"}
+        try:
+            response = self._llm.generate(messages, **kwargs)
+            return {"content": response.content, "model": response.model, "tokens_used": response.tokens_used}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def generate_with_context(self, prompt: str, include_history: bool = True, limit: int = 10, **kwargs) -> Dict[str, Any]:
+        messages: List[Dict[str, str]] = []
+        if include_history:
+            memory = self.get_memory()
+            if memory:
+                messages.extend(memory.get_context_for_llm(limit=limit))
+        messages.append({"role": "user", "content": prompt})
+        return self.generate(messages, **kwargs)
     
     def send_message(self, text: str) -> Dict[str, Any]:
         brain = self.get_brain()
@@ -562,81 +619,159 @@ class PluginManager:
             return {"error": str(e)}
     
     # ─── Plugin Installation ────────────────────────────────────────
+
+    @staticmethod
+    def _version_key(version: str) -> List[int]:
+        nums = [int(x) for x in re.findall(r"\d+", str(version or ""))]
+        return nums if nums else [0]
+
+    def _find_catalog_item(self, plugin_id: str) -> Optional[Dict[str, Any]]:
+        for item in self.fetch_catalog():
+            if item.get("id") == plugin_id:
+                return item
+        return None
+
+    def _download_plugin_zip(self, plugin_id: str, download_url: str) -> Optional[bytes]:
+        if not HAS_REQUESTS:
+            logger.error("requests not installed")
+            return None
+        logger.info(f"Downloading plugin {plugin_id}...")
+        response = requests.get(download_url, timeout=30)
+        if response.status_code != 200:
+            logger.error(f"Download failed: {response.status_code}")
+            return None
+        return response.content
+
+    def _extract_zip(self, archive: bytes, target_dir: Path):
+        target_dir.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(BytesIO(archive)) as zf:
+            names = zf.namelist()
+            top = [n for n in names if n and not n.endswith('/') and not n.startswith("__MACOSX")]
+            root = None
+            if top and "/" in top[0]:
+                candidate = top[0].split("/", 1)[0]
+                if all(n.startswith(candidate + "/") or n == candidate + "/" for n in names):
+                    root = candidate
+
+            for name in names:
+                if name.endswith('/') or name.startswith("__MACOSX"):
+                    continue
+                rel_name = name[len(root) + 1:] if root and name.startswith(root + "/") else name
+                if not rel_name:
+                    continue
+                target = target_dir / rel_name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(zf.read(name))
+
+    def _install_from_archive(self, plugin_id: str, archive: bytes, replacing: bool = False) -> bool:
+        plugin_dir = self.plugins_dir / plugin_id
+        backup_data = None
+        try:
+            with tempfile.TemporaryDirectory(prefix=f"daria-plugin-{plugin_id}-") as td:
+                unpacked = Path(td) / "plugin"
+                self._extract_zip(archive, unpacked)
+                if not (unpacked / "plugin.yaml").exists():
+                    logger.error(f"Invalid plugin archive for {plugin_id}: plugin.yaml not found")
+                    return False
+
+                if replacing and plugin_id in self._plugins:
+                    state = self._plugins[plugin_id]
+                    self.unload_plugin(plugin_id)
+                    data_dir = state.path / "data"
+                    if data_dir.exists():
+                        backup_data = Path(td) / "data_backup"
+                        shutil.copytree(data_dir, backup_data)
+                    if state.path.exists():
+                        shutil.rmtree(state.path)
+                    plugin_dir = state.path
+                elif plugin_dir.exists() and not replacing:
+                    logger.info(f"Plugin {plugin_id} already exists")
+                    return True
+
+                shutil.copytree(unpacked, plugin_dir, dirs_exist_ok=True)
+
+                if backup_data and backup_data.exists():
+                    restored = plugin_dir / "data"
+                    if restored.exists():
+                        shutil.rmtree(restored)
+                    shutil.copytree(backup_data, restored)
+
+                (plugin_dir / ".installed").write_text(datetime.now().isoformat(), encoding="utf-8")
+
+            self.discover_plugins()
+            if plugin_id in self._plugins:
+                return self.load_plugin(plugin_id)
+            return False
+        except Exception as e:
+            logger.error(f"Install failed [{plugin_id}]: {e}")
+            return False
     
     def install_plugin(self, plugin_id: str) -> bool:
         """Install plugin from catalog"""
         if plugin_id in self._plugins:
             logger.info(f"Plugin {plugin_id} already installed")
             return True
-        
-        catalog = self.fetch_catalog()
-        plugin_info = None
-        for item in catalog:
-            if item.get('id') == plugin_id:
-                plugin_info = item
-                break
-        
+
+        plugin_info = self._find_catalog_item(plugin_id)
         if not plugin_info:
             logger.error(f"Plugin {plugin_id} not found in catalog")
             return False
-        
-        download_url = plugin_info.get('download_url')
+
+        download_url = plugin_info.get("download_url")
         if not download_url:
             logger.error(f"No download URL for {plugin_id}")
             return False
-        
-        # Download and extract
-        try:
-            logger.info(f"Downloading plugin {plugin_id}...")
-            
-            if not HAS_REQUESTS:
-                logger.error("requests not installed")
-                return False
-            
-            response = requests.get(download_url, timeout=30)
-            if response.status_code != 200:
-                logger.error(f"Download failed: {response.status_code}")
-                return False
-            
-            # Extract zip
-            plugin_dir = self.plugins_dir / plugin_id
-            plugin_dir.mkdir(parents=True, exist_ok=True)
-            
-            with zipfile.ZipFile(BytesIO(response.content)) as zf:
-                # Check if zip has root folder
-                names = zf.namelist()
-                if names and '/' in names[0]:
-                    root = names[0].split('/')[0]
-                    # Extract with stripping root
-                    for name in names:
-                        if name.startswith(root + '/'):
-                            new_name = name[len(root)+1:]
-                            if new_name:
-                                target = plugin_dir / new_name
-                                if name.endswith('/'):
-                                    target.mkdir(parents=True, exist_ok=True)
-                                else:
-                                    target.parent.mkdir(parents=True, exist_ok=True)
-                                    target.write_bytes(zf.read(name))
-                else:
-                    zf.extractall(plugin_dir)
-            
-            # Mark installed
-            (plugin_dir / ".installed").write_text(datetime.now().isoformat())
-            
-            # Refresh
-            self.discover_plugins()
-            
-            # Load
-            if plugin_id in self._plugins:
-                self.load_plugin(plugin_id)
-                return True
-            
+
+        archive = self._download_plugin_zip(plugin_id, download_url)
+        if not archive:
             return False
-            
-        except Exception as e:
-            logger.error(f"Install failed: {e}")
+        return self._install_from_archive(plugin_id, archive, replacing=False)
+
+    def check_plugin_updates(self) -> List[Dict[str, Any]]:
+        updates: List[Dict[str, Any]] = []
+        catalog = {item.get("id"): item for item in self.fetch_catalog()}
+        for plugin_id, state in self._plugins.items():
+            item = catalog.get(plugin_id)
+            if not item:
+                continue
+            current = state.manifest.version or "0.0.0"
+            latest = item.get("version", current)
+            if self._version_key(latest) > self._version_key(current):
+                updates.append({
+                    "id": plugin_id,
+                    "name": state.manifest.name,
+                    "current_version": current,
+                    "latest_version": latest,
+                    "download_url": item.get("download_url", ""),
+                })
+        return updates
+
+    def update_plugin(self, plugin_id: str) -> bool:
+        state = self._plugins.get(plugin_id)
+        if not state:
             return False
+        item = self._find_catalog_item(plugin_id)
+        if not item:
+            return False
+        latest = item.get("version", state.manifest.version or "0.0.0")
+        if self._version_key(latest) <= self._version_key(state.manifest.version or "0.0.0"):
+            return True
+        download_url = item.get("download_url")
+        if not download_url:
+            return False
+        archive = self._download_plugin_zip(plugin_id, download_url)
+        if not archive:
+            return False
+        return self._install_from_archive(plugin_id, archive, replacing=True)
+
+    def update_all_plugins(self) -> Dict[str, Any]:
+        updates = self.check_plugin_updates()
+        results = []
+        for item in updates:
+            pid = item["id"]
+            ok = self.update_plugin(pid)
+            results.append({"id": pid, "status": "ok" if ok else "error"})
+        return {"total": len(updates), "results": results}
     
     def uninstall_plugin(self, plugin_id: str) -> bool:
         if plugin_id not in self._plugins:

@@ -1,5 +1,5 @@
 """
-DARIA Config v0.7.4
+DARIA Config v0.8.1
 Configuration management
 """
 
@@ -54,7 +54,7 @@ class PluginsConfig:
 
 @dataclass
 class DariaConfig:
-    version: str = "0.7.4"
+    version: str = "0.8.1"
     web: WebConfig = field(default_factory=WebConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     voice: VoiceConfig = field(default_factory=VoiceConfig)

@@ -40,6 +40,7 @@
         <div class="start-header"><div class="start-avatar">🌸</div><div><div class="start-name">Дарья</div><div class="start-version">v{{ version }}</div></div></div>
         <div class="start-items">
             <div class="start-item" onclick="openWindow('chat');toggleStartMenu()"><span>💬</span>Чат</div>
+            <div class="start-item" onclick="openWindow('updater');toggleStartMenu()"><span>⬆️</span>Обновления</div>
             <div class="start-item" onclick="openWindow('files');toggleStartMenu()"><span>📁</span>Файлы</div>
             <div class="start-item" onclick="openWindow('terminal');toggleStartMenu()"><span>💻</span>Терминал</div>
             <div class="start-item" onclick="openWindow('store');toggleStartMenu()"><span>🛒</span>Магазин</div>
@@ -121,7 +122,7 @@
     <template id="terminal-content">
         <div class="terminal-container">
             <div class="terminal-output" id="terminal-output">
-                <div class="term-line">DARIA Terminal v0.7.4</div>
+                <div class="term-line">DARIA Terminal v0.8.1</div>
                 <div class="term-line">Введи help для команд</div>
             </div>
             <div class="terminal-input"><span>$</span><input type="text" id="terminal-input" onkeypress="if(event.key==='Enter')executeTerminal()"></div>
@@ -212,6 +213,27 @@
         <div class="store-container">
             <div class="store-header"><h3>🛒 Магазин плагинов</h3><button onclick="refreshStore()">🔄</button></div>
             <div class="store-plugins" id="store-plugins"><div class="loading">Загрузка...</div></div>
+        </div>
+    </template>
+
+    <template id="updater-content">
+        <div class="settings-container">
+            <div class="settings-section">
+                <h3>⬆️ Обновление системы</h3>
+                <div class="setting-row"><label>Состояние</label><span id="updater-state">Загрузка...</span></div>
+                <div class="setting-row"><label>Автообновление</label><input id="updater-auto" type="checkbox" onchange="updaterToggleAuto(this)"></div>
+                <div class="setting-row"><label>GitHub repo</label><input id="updater-repo" type="text" value="dariumi/Daria"></div>
+                <div class="setting-row"><label>Ветка</label><input id="updater-ref" type="text" value="main"></div>
+                <div class="setting-row"><button onclick="updaterCheck()">Проверить</button><button class="btn-primary" onclick="updaterRunGithub()">Обновить из GitHub</button></div>
+                <div class="setting-row"><label>Архив (.zip/.tar.gz)</label><input id="updater-archive-path" type="text" placeholder="/path/to/Daria-update.zip"></div>
+                <div class="setting-row"><button onclick="updaterRunArchive()">Обновить из архива</button></div>
+                <p id="updater-core-info">—</p>
+            </div>
+            <div class="settings-section">
+                <h3>🧩 Обновление плагинов</h3>
+                <div class="setting-row"><button onclick="updaterLoadPluginUpdates()">Проверить плагины</button><button onclick="updaterUpdateAllPlugins()">Обновить всё</button></div>
+                <div id="updater-plugin-updates"><div class="loading">Загрузка...</div></div>
+            </div>
         </div>
     </template>
 
