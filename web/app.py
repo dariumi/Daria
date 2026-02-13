@@ -1,10 +1,11 @@
 """
-DARIA Web App v0.8.1
+DARIA Web App v0.8.5
 Chat history, attention system, proactive messaging, mood behaviors
 """
 
 import os
 import json
+import html
 import logging
 import queue
 import threading
@@ -144,6 +145,17 @@ class ChatHistoryManager:
         }, ensure_ascii=False))
         self.current_chat_id = chat_id
         return chat_id
+
+    def ensure_named_chat(self, chat_id: str, title: str = "") -> str:
+        chat_file = self.chats_dir / f"{chat_id}.json"
+        if not chat_file.exists():
+            chat_file.write_text(json.dumps({
+                "id": chat_id,
+                "created": datetime.now().isoformat(),
+                "title": title,
+                "messages": []
+            }, ensure_ascii=False))
+        return chat_id
     
     def get_chat(self, chat_id: str) -> Optional[Dict]:
         chat_file = self.chats_dir / f"{chat_id}.json"
@@ -161,6 +173,14 @@ class ChatHistoryManager:
             })
             chat_file = self.chats_dir / f"{chat_id}.json"
             chat_file.write_text(json.dumps(chat, ensure_ascii=False, indent=2))
+
+    def add_external_message(self, source: str, source_chat_id: str, role: str, content: str):
+        safe_source = re.sub(r"[^a-zA-Z0-9_-]+", "-", source or "external")
+        safe_chat = re.sub(r"[^a-zA-Z0-9_-]+", "-", source_chat_id or "main")
+        chat_id = f"{safe_source}_{safe_chat}"
+        self.ensure_named_chat(chat_id, title=f"{source}: {source_chat_id}")
+        self.add_message(chat_id, role, content)
+        return chat_id
     
     def list_chats(self) -> List[Dict]:
         chats = []
@@ -173,6 +193,7 @@ class ChatHistoryManager:
                 chats.append({
                     "id": data["id"],
                     "created": data["created"],
+                    "title": data.get("title", ""),
                     "preview": preview,
                     "message_count": len(data.get("messages", []))
                 })
@@ -199,6 +220,7 @@ class AttentionThread(threading.Thread):
         self.running = True
         self._brain = None
         self._proactive_queue: List[Dict] = []
+        self._last_sent = datetime.now()
     
     def run(self):
         tick = 0
@@ -226,6 +248,7 @@ class AttentionThread(threading.Thread):
                             )
                         # Store for chat injection
                         self._proactive_queue.append(proactive)
+                        self._last_sent = datetime.now()
                         
                         try:
                             from plyer import notification as plyer_notif
@@ -241,8 +264,22 @@ class AttentionThread(threading.Thread):
                 
                 # Check attention every minute
                 if tick % 2 == 0:
-                    # Use check_needed (fixed method)
-                    attention = self._brain.attention.check_needed()
+                    last_user = ""
+                    last_assistant = ""
+                    try:
+                        memory = get_memory()
+                        if memory and memory.working.turns:
+                            last_turn = memory.working.turns[-1]
+                            last_user = last_turn.user_message
+                            last_assistant = last_turn.assistant_response
+                    except Exception:
+                        pass
+
+                    attention = self._brain.attention.check_needed(
+                        mood=self._brain.mood.mood,
+                        last_user=last_user,
+                        last_assistant=last_assistant,
+                    )
                     if attention:
                         self.notifications.add(
                             title="🌸 Дарья",
@@ -264,6 +301,7 @@ class AttentionThread(threading.Thread):
                             )
                         except:
                             pass
+                        self._last_sent = datetime.now()
 
                 # Mood-based behavior check (Point #7)
                 if tick % 6 == 0:
@@ -278,6 +316,19 @@ class AttentionThread(threading.Thread):
                             action="desktop_mischief",
                             system=False
                         )
+
+                # Guaranteed gentle heartbeat every 6 hours if nothing was sent
+                if (datetime.now() - self._last_sent).total_seconds() > 6 * 3600:
+                    self.notifications.add(
+                        title="🌸 Дарья",
+                        message="Я тихонько рядом. Если захочешь, давай поговорим 💕",
+                        type="attention",
+                        icon="💕",
+                        duration=15000,
+                        action="open_chat",
+                        system=True
+                    )
+                    self._last_sent = datetime.now()
                         
             except Exception as e:
                 logger.debug(f"Attention error: {e}")
@@ -299,13 +350,13 @@ class AttentionThread(threading.Thread):
 #  Flask App
 # ═══════════════════════════════════════════════════════════════════
 
-VERSION = "0.8.1"
+VERSION = "0.8.5"
 
 app = Flask(__name__,
     template_folder=str(Path(__file__).parent / "templates"),
     static_folder=str(Path(__file__).parent / "static")
 )
-app.config['SECRET_KEY'] = 'daria-secret-v0.8.1'
+app.config['SECRET_KEY'] = 'daria-secret-v0.8.5'
 app.config['JSON_AS_ASCII'] = False
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
@@ -488,6 +539,7 @@ def api_status():
     data = {
         "version": VERSION,
         "brain": brain is not None,
+        "reason": brain is not None,
         "memory": memory is not None,
         "plugins": plugins is not None,
         "llm": llm_status,
@@ -510,6 +562,19 @@ def api_state():
         "mood_color": "#60a5fa",
         "energy": 0.7,
         "social_need": 0.5,
+    })
+
+
+@app.route("/api/self/perception")
+def api_self_perception():
+    brain = get_brain()
+    if brain and hasattr(brain, "get_self_perception"):
+        return jsonify(brain.get_self_perception())
+    return jsonify({
+        "self_name": "Даша",
+        "traits": ["мягкая", "бережная", "искренняя"],
+        "state": {},
+        "followups": [],
     })
 
 
@@ -555,10 +620,9 @@ def api_settings():
     if memory:
         if data.get("name"):
             memory.remember(f"Пользователя зовут {data['name']}", importance=1.0)
-            memory._user_profile["user_name"] = data["name"]
+            memory.set_user_profile("user_name", data["name"])
         if data.get("gender"):
-            memory._user_profile["user_gender"] = data["gender"]
-        memory._save_profiles()
+            memory.set_user_profile("user_gender", data["gender"])
     
     brain = get_brain()
     if brain and "mode" in data:
@@ -636,6 +700,63 @@ def api_chat():
     except Exception as e:
         logger.error(f"Chat error: {e}")
         return jsonify({"response": "Ой, что-то пошло не так... 💔", "thinking": None})
+
+
+@app.route("/api/chat/file-assist", methods=["POST"])
+def api_chat_file_assist():
+    """Let Daria work with file content and return updated text."""
+    data = request.get_json() or {}
+    path = (data.get("path") or "").strip()
+    instruction = (data.get("instruction") or "").strip()
+    if not path or not instruction:
+        return jsonify({"error": "path and instruction are required"}), 400
+
+    target = (FILES_DIR / path).resolve()
+    if not str(target).startswith(str(FILES_DIR.resolve())) or not target.exists() or not target.is_file():
+        return jsonify({"error": "Invalid file path"}), 400
+
+    original = target.read_text(encoding="utf-8")
+    brain = get_brain()
+    if not brain or not getattr(brain, "_llm", None):
+        return jsonify({"error": "LLM unavailable"}), 503
+
+    system_prompt = (
+        "Ты Даша. Твоя задача — отредактировать файл по инструкции пользователя. "
+        "Верни ТОЛЬКО итоговый текст файла без пояснений и без markdown."
+    )
+    user_prompt = (
+        f"Путь: {path}\n"
+        f"Инструкция: {instruction}\n\n"
+        "Текущий текст файла:\n"
+        "<<<FILE>>>\n"
+        f"{original}\n"
+        "<<<END>>>"
+    )
+    try:
+        response = brain._llm.generate([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ])
+        updated = (response.content or "").strip()
+        if not updated:
+            return jsonify({"error": "Empty LLM response"}), 500
+        return jsonify({"status": "ok", "path": path, "content": updated})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/chats/external", methods=["POST"])
+def api_chats_external():
+    """Mirror external chats (e.g. Telegram) into web chat history."""
+    data = request.get_json() or {}
+    source = data.get("source", "external")
+    source_chat_id = str(data.get("source_chat_id", "main"))
+    role = data.get("role", "user")
+    content = (data.get("content") or "").strip()
+    if not content:
+        return jsonify({"error": "Empty content"}), 400
+    chat_id = chat_history.add_external_message(source, source_chat_id, role, content)
+    return jsonify({"status": "ok", "chat_id": chat_id})
 
 
 @app.route("/api/proactive")
@@ -783,6 +904,55 @@ def api_uploads(filename):
     return send_from_directory(UPLOADS_DIR, filename)
 
 
+@app.route("/api/senses/see", methods=["POST"])
+def api_senses_see():
+    """Basic visual understanding from user-provided description."""
+    data = request.get_json() or {}
+    description = (data.get("description") or "").strip()
+    if not description:
+        return jsonify({"error": "description required"}), 400
+    brain = get_brain()
+    if brain and getattr(brain, "_llm", None):
+        prompt = (
+            "Ты Даша. Кратко и по-доброму объясни, что ты видишь по описанию, "
+            "и предложи 1-2 действия.\n\n"
+            f"Описание: {description}"
+        )
+        try:
+            r = brain._llm.generate([
+                {"role": "system", "content": "Ты анализируешь визуальные описания как мягкий ассистент."},
+                {"role": "user", "content": prompt},
+            ])
+            return jsonify({"status": "ok", "result": r.content})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    return jsonify({"status": "ok", "result": f"Поняла описание: {description}"})
+
+
+@app.route("/api/senses/hear", methods=["POST"])
+def api_senses_hear():
+    """Basic hearing understanding from transcript text."""
+    data = request.get_json() or {}
+    transcript = (data.get("transcript") or "").strip()
+    if not transcript:
+        return jsonify({"error": "transcript required"}), 400
+    brain = get_brain()
+    if brain and getattr(brain, "_llm", None):
+        prompt = (
+            "Ты Даша. По расшифровке звука выдели смысл, эмоцию и предложи мягкий ответ.\n\n"
+            f"Текст: {transcript}"
+        )
+        try:
+            r = brain._llm.generate([
+                {"role": "system", "content": "Ты анализируешь услышанный текст как эмпатичный ассистент."},
+                {"role": "user", "content": prompt},
+            ])
+            return jsonify({"status": "ok", "result": r.content})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    return jsonify({"status": "ok", "result": f"Я услышала: {transcript}"})
+
+
 @app.route("/api/files")
 def api_files_list():
     path = request.args.get("path", "")
@@ -807,7 +977,9 @@ def api_files_list():
 @app.route("/api/files/read")
 def api_files_read():
     path = request.args.get("path", "")
-    target = FILES_DIR / path
+    target = (FILES_DIR / path).resolve()
+    if not str(target).startswith(str(FILES_DIR.resolve())):
+        return jsonify({"error": "Invalid path"}), 400
     if not target.exists() or not target.is_file():
         return jsonify({"error": "Not found"}), 404
     try:
@@ -822,9 +994,26 @@ def api_files_write():
     path, content = data.get("path", ""), data.get("content", "")
     if not path:
         return jsonify({"error": "Path required"}), 400
-    target = FILES_DIR / path
+    target = (FILES_DIR / path).resolve()
+    if not str(target).startswith(str(FILES_DIR.resolve())):
+        return jsonify({"error": "Invalid path"}), 400
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding='utf-8')
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/files/apply-assist", methods=["POST"])
+def api_files_apply_assist():
+    data = request.get_json() or {}
+    path = data.get("path", "")
+    content = data.get("content", "")
+    if not path:
+        return jsonify({"error": "Path required"}), 400
+    target = (FILES_DIR / path).resolve()
+    if not str(target).startswith(str(FILES_DIR.resolve())):
+        return jsonify({"error": "Invalid path"}), 400
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
     return jsonify({"status": "ok"})
 
 
@@ -832,14 +1021,19 @@ def api_files_write():
 def api_files_mkdir():
     path = (request.get_json() or {}).get("path", "")
     if path:
-        (FILES_DIR / path).mkdir(parents=True, exist_ok=True)
+        target = (FILES_DIR / path).resolve()
+        if not str(target).startswith(str(FILES_DIR.resolve())):
+            return jsonify({"error": "Invalid path"}), 400
+        target.mkdir(parents=True, exist_ok=True)
     return jsonify({"status": "ok"})
 
 
 @app.route("/api/files/delete", methods=["POST"])
 def api_files_delete():
     path = (request.get_json() or {}).get("path", "")
-    target = FILES_DIR / path
+    target = (FILES_DIR / path).resolve()
+    if not str(target).startswith(str(FILES_DIR.resolve())):
+        return jsonify({"error": "Invalid path"}), 400
     if target.is_dir():
         shutil.rmtree(target)
     elif target.is_file():
@@ -1175,6 +1369,36 @@ def api_update_state():
         **_update_state,
         "version": _read_version(PROJECT_ROOT / "VERSION"),
     })
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Wiki
+# ═══════════════════════════════════════════════════════════════════
+
+@app.route("/api/wiki/pages")
+def api_wiki_pages():
+    wiki_dir = PROJECT_ROOT / "docs" / "wiki"
+    wiki_dir.mkdir(parents=True, exist_ok=True)
+    pages = sorted([p.name for p in wiki_dir.glob("*.md")])
+    return jsonify({"pages": pages})
+
+
+@app.route("/api/wiki/page")
+def api_wiki_page():
+    name = (request.args.get("name") or "Home.md").strip()
+    if "/" in name or "\\" in name:
+        return jsonify({"error": "Invalid page"}), 400
+    wiki_dir = PROJECT_ROOT / "docs" / "wiki"
+    path = (wiki_dir / name).resolve()
+    if not path.exists() or not str(path).startswith(str(wiki_dir.resolve())):
+        return jsonify({"error": "Not found"}), 404
+    text = path.read_text(encoding="utf-8")
+    return jsonify({"name": name, "content": text})
+
+
+@app.route("/wiki")
+def wiki_redirect():
+    return render_template("index.html", version=VERSION)
 
 
 # ═══════════════════════════════════════════════════════════════════

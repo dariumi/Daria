@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🌸 DARIA v0.8.1 Installation Script
+🌸 DARIA v0.8.5 Installation Script
 - Fixed SSL regeneration crash
 - Updated banner & version
 - OS-dependent server setup
@@ -9,7 +9,7 @@
 import os, sys, subprocess, platform, shutil, socket
 from pathlib import Path
 
-VERSION = "0.8.1"
+VERSION = "0.8.5"
 DEFAULT_PORT = 7777
 LOCAL_DOMAIN = "dasha.local"
 

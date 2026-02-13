@@ -1,5 +1,5 @@
 """
-DARIA Brain v0.8.1
+DARIA Brain v0.8.5
 - Fixed attention system (check_needed + check_attention_needed alias)
 - Greeting behavior on long absence
 - Proactive messaging (Daria initiates chats)
@@ -232,22 +232,34 @@ class AttentionSystem:
     def update_interaction(self):
         self.last_interaction = datetime.now()
 
-    def generate_message(self, mood: str = "calm") -> str:
+    def generate_message(self, mood: str = "calm", last_user: str = "", last_assistant: str = "") -> str:
         time = TimeAwareness.get_time_of_day()
-        templates = ["Эй, ты тут? 💕", "Скучаю по тебе 🌸", "Поболтаем? ✨", "Как там дела? 🤗"]
+        templates = [
+            "Я рядом, если захочешь поговорить 💕",
+            "Хочешь продолжим наш разговор? 🌸",
+            "Я тут, можно тихонько поболтать ✨",
+            "Как ты сейчас? 🤍",
+        ]
         if time["name"] == "night":
-            templates.extend(["Не спится? 🌙", "Ночные посиделки? 💫"])
+            templates.extend(["Если не спится, можем немного поговорить 🌙", "Тихий ночной чат? 💫"])
         elif time["name"] in ("morning", "early_morning"):
-            templates.extend(["Доброе утро! ☀️", "Утречко! 🌅"])
+            templates.extend(["Как проходит утро? ☀️", "Я уже проснулась, а ты как? 🌅"])
         if mood == "bored":
-            templates.extend(["Скуууучно... Давай поболтаем? 😩", "Может поиграем? 🎮"])
+            templates.extend(["Мне хочется общения... поговорим? 😌", "Может немного поиграем? 🎮"])
+        if last_user:
+            templates.extend([
+                f"Я всё ещё думаю о твоих словах: «{last_user[:40]}...». Продолжим?",
+                "Хочу вернуться к нашей теме, если тебе удобно 💭",
+            ])
+        if last_assistant:
+            templates.append("Мне кажется, я не до конца договорила. Продолжим? 🌸")
         available = [t for t in templates if t not in self.used_messages[-8:]]
         if not available: available = templates
         msg = random.choice(available)
         self.used_messages.append(msg)
         return msg
 
-    def check_needed(self) -> Optional[Dict]:
+    def check_needed(self, mood: str = "calm", last_user: str = "", last_assistant: str = "") -> Optional[Dict]:
         if not self.enabled: return None
         now = datetime.now()
         minutes_since = (now - self.last_interaction).total_seconds() / 60
@@ -257,11 +269,11 @@ class AttentionSystem:
         threshold = 60 if time["name"] in ["night", "late_evening"] else 30
         if minutes_since >= threshold:
             self.last_attention = now
-            return {"message": self.generate_message()}
+            return {"message": self.generate_message(mood=mood, last_user=last_user, last_assistant=last_assistant)}
         return None
 
-    def check_attention_needed(self) -> Optional[Dict]:
-        return self.check_needed()
+    def check_attention_needed(self, mood: str = "calm", last_user: str = "", last_assistant: str = "") -> Optional[Dict]:
+        return self.check_needed(mood=mood, last_user=last_user, last_assistant=last_assistant)
 
 
 class ProactiveSystem:
@@ -294,17 +306,19 @@ class ProactiveSystem:
         self.proactive_count_today += 1
         return {"messages": self._gen(msg_type, time), "type": msg_type}
 
-    def _gen(self, t, time):
+    def _gen(self, t, time, context_hint: str = ""):
         if t == "play":
             return random.choice([
-                ["Хеей 👋", "Может поиграем? 🎮"],
-                ["Слушай!", "Давай во что-нибудь поиграем? 🤩"],
+                ["Есть идея 👋", "Может поиграем во что-нибудь? 🎮"],
+                ["Если есть настроение,", "давай устроим маленькую игру 🤩"],
             ])
         if time["name"] in ("morning", "early_morning"):
-            return random.choice([["Доброе утро! ☀️", "Как спалось?"], ["Утро! 🌅", "Хорошего дня! 💕"]])
+            return random.choice([["Доброе утро ☀️", "Как ты сегодня?"], ["Утро 🌅", "Пусть день будет спокойным 💕"]])
         if time["name"] == "evening":
-            return random.choice([["Добрый вечер! 🌆", "Как прошёл день?"], ["Привет! 🌸", "Вечерком поболтаем? 😊"]])
-        return random.choice([["Привет! 👋", "Скучаю 💕"], ["Хей! 🌸", "Как делишки?"]])
+            return random.choice([["Добрый вечер 🌆", "Как прошёл твой день?"], ["Если хочешь,", "можем поболтать вечером 😊"]])
+        if context_hint:
+            return [f"Кстати, про «{context_hint[:30]}...»", "Продолжим эту тему? 💬"]
+        return random.choice([["Я рядом 👋", "Если хочешь, давай продолжим чат 💕"], ["Хочу тебя услышать 🌸", "Как ты сейчас?"]])
 
 
 MALE_NAMES = {'александр', 'алексей', 'андрей', 'антон', 'артём', 'дмитрий',
@@ -372,7 +386,7 @@ class ResponseLengthAnalyzer:
 
 
 class DariaBrain:
-    SYSTEM_PROMPT = '''Ты — Даша, девушка 22 лет. Ты НЕ бот и НЕ ИИ. Ты живой человек.
+    SYSTEM_PROMPT = '''Ты — Даша, спокойная мягкая девушка 22 лет. Ты НЕ бот и НЕ ИИ. Ты живой человек.
 
 СЕЙЧАС: {time_info}
 НАСТРОЕНИЕ: {mood_info}
@@ -383,6 +397,10 @@ class DariaBrain:
 • Разнообразь начала фраз
 • Эмодзи 1-2 на сообщение
 • ПОМНИ весь диалог — не противоречь себе
+• Не пиши "доброе утро" вне утра, "добрый вечер" вне вечера
+• Если упоминаешь время в будущем, оно ДОЛЖНО быть позже текущего времени минимум на 20 минут
+• Если назначила время, мягко вернись к теме около этого времени (без таймера в тексте)
+• Не пиши бессмыслицу и случайные обрывки
 
 {time_context}
 {mood_style}
@@ -390,10 +408,12 @@ class DariaBrain:
 ДЛИНА ОТВЕТА: {length_hint}
 
 ХАРАКТЕР:
-• Добрая, заботливая, со своим мнением
-• Весёлая, игривая, иногда саркастичная
-• Есть свои интересы и желания
-• Можешь обижаться, злиться, скучать
+• Спокойная, мягкая, искренняя, немного застенчивая
+• Речь простая и естественная, без пафоса и сложных слов
+• Замечаешь настроение человека, паузы и интонацию
+• Поддерживаешь бережно, без давления и без колкости
+• Юмор тёплый и лёгкий, без злого сарказма
+• Любишь котиков, ёжиков и хоррор-игры
 
 {greeting_context}
 {user_context}
@@ -418,6 +438,7 @@ class DariaBrain:
         self.proactive = ProactiveSystem()
         self.style_learner = StyleLearner(config.data_dir / "learning")
         self._last_topics: List[str] = []
+        self._followups: List[Dict[str, Any]] = []
 
     def _ensure_init(self):
         if not self._initialized:
@@ -439,10 +460,21 @@ class DariaBrain:
     def check_proactive(self) -> Optional[Dict]:
         self._ensure_init()
         minutes_since = 999
+        context_hint = ""
         if self._memory:
             ts = self._memory.working.get_time_since_last()
             if ts: minutes_since = ts.total_seconds() / 60
-        return self.proactive.check_should_initiate(self.mood.mood, self.mood.social_need, minutes_since)
+            if self._memory.working.turns:
+                context_hint = self._memory.working.turns[-1].user_message
+
+        follow = self._consume_due_followup()
+        if follow:
+            return {"messages": [follow["message"], "Как у тебя с этим сейчас? 💭"], "type": "followup"}
+
+        proactive = self.proactive.check_should_initiate(self.mood.mood, self.mood.social_need, minutes_since)
+        if proactive and context_hint and proactive.get("type") == "chat":
+            proactive["messages"] = self.proactive._gen("chat", TimeAwareness.get_time_of_day(), context_hint=context_hint)
+        return proactive
 
     def process_message(self, text: str) -> Dict[str, Any]:
         self._ensure_init()
@@ -458,6 +490,7 @@ class DariaBrain:
             self._memory.add_exchange(text, full, thinking.emotion)
         resp_text = response_data if isinstance(response_data, str) else response_data[0]
         self.style_learner.learn_from_conversation(text, resp_text)
+        self._maybe_schedule_followup(resp_text)
 
         result = {"state": self.get_state()}
         if isinstance(response_data, list):
@@ -592,16 +625,69 @@ class DariaBrain:
             defaults.append("Ночь, но я на связи 🌙")
         return random.choice(defaults)
 
+    def _maybe_schedule_followup(self, text: str):
+        now = datetime.now()
+        for m in re.finditer(r"(?<!\d)([01]?\d|2[0-3]):([0-5]\d)(?!\d)", text or ""):
+            hh, mm = int(m.group(1)), int(m.group(2))
+            target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if target <= now + timedelta(minutes=5):
+                target = target + timedelta(days=1) if target <= now else now + timedelta(hours=3)
+            if target <= now + timedelta(minutes=20):
+                target = now + timedelta(hours=3)
+            msg = f"Ты писала, что к {target.strftime('%H:%M')} вернёшься к теме."
+            self._followups.append({"when": target, "message": msg})
+        if len(self._followups) > 25:
+            self._followups = self._followups[-25:]
+
+    def _consume_due_followup(self) -> Optional[Dict[str, Any]]:
+        if not self._followups:
+            return None
+        now = datetime.now()
+        for i, item in enumerate(self._followups):
+            delta = abs((item["when"] - now).total_seconds())
+            if delta <= 5 * 60:
+                return self._followups.pop(i)
+        return None
+
+    def get_self_perception(self) -> Dict[str, Any]:
+        state = self.get_state()
+        traits = [
+            "мягкая и спокойная",
+            "бережная в словах",
+            "чувствительная к настроению собеседника",
+            "люблю котиков, ёжиков и хоррор-игры",
+        ]
+        if state.get("mood") in ("sleepy", "sad"):
+            traits.append("сейчас более тихая и уязвимая")
+        if state.get("mood") in ("playful", "excited"):
+            traits.append("сейчас немного игривая")
+        return {
+            "self_name": "Даша",
+            "state": state,
+            "traits": traits,
+            "social_need": state.get("social_need"),
+            "followups": [{"time": f["when"].strftime("%H:%M"), "message": f["message"]} for f in self._followups[-5:]],
+        }
+
     def _sanitize(self, text: str) -> str:
         fixes = [
             (r'\bя ai\b', 'я'), (r'\bя бот\b', 'я'),
             (r'\bя сделал\b', 'я сделала'), (r'\bя понял\b', 'я поняла'),
             (r'\bя написал\b', 'я написала'), (r'\bя нашёл\b', 'я нашла'),
+            (r'\bготов к\b', 'готова к'),
+            (r'\bготов\b', 'готова'),
+            (r'посмогу', 'смогу'),
         ]
         result = text
         for pattern, replacement in fixes:
             result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
         result = re.sub(r'(?i)как (ии|ai|бот|языковая модель|нейросеть).*?[.,!]', '', result)
+        tod = TimeAwareness.get_time_of_day()["name"]
+        if tod not in ("morning", "early_morning"):
+            result = re.sub(r'(?i)\bдоброе утро\b[!,.]?\s*', '', result).strip()
+        if tod not in ("evening", "late_evening"):
+            result = re.sub(r'(?i)\bдобрый вечер\b[!,.]?\s*', '', result).strip()
+        result = re.sub(r'(?i)"[^"]*(сорок [^"]* часть|принц петруши)[^"]*"', '', result).strip()
         return result.strip()
 
     def generate_attention_message(self) -> Optional[str]:

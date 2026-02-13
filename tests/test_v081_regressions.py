@@ -44,6 +44,35 @@ class TestV081Regressions(unittest.TestCase):
         finally:
             web_app.get_brain = old_get_brain
 
+    def test_external_chat_mirror_endpoint(self):
+        client = web_app.app.test_client()
+        resp = client.post("/api/chats/external", json={
+            "source": "telegram",
+            "source_chat_id": "test-room",
+            "role": "user",
+            "content": "привет из теста"
+        })
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data.get("status"), "ok")
+        self.assertTrue(data.get("chat_id", "").startswith("telegram_"))
+
+    def test_self_perception_endpoint(self):
+        class DummyBrain:
+            def get_self_perception(self):
+                return {"self_name": "Даша", "state": {"mood": "calm"}, "traits": []}
+
+        old_get_brain = web_app.get_brain
+        web_app.get_brain = lambda: DummyBrain()
+        try:
+            client = web_app.app.test_client()
+            resp = client.get("/api/self/perception")
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertEqual(data.get("self_name"), "Даша")
+        finally:
+            web_app.get_brain = old_get_brain
+
 
 if __name__ == "__main__":
     unittest.main()

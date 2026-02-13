@@ -28,6 +28,33 @@
                 Автозапуск при старте
             </label>
         </div>
+
+        <div class="form-group checkbox">
+            <label>
+                <input type="checkbox" id="tg-mirror-web" checked>
+                Дублировать диалог в веб-чат
+            </label>
+        </div>
+
+        <div class="form-group checkbox">
+            <label>
+                <input type="checkbox" id="tg-group-mode">
+                Общий режим для групп (отдельная память)
+            </label>
+        </div>
+
+        <div class="form-group checkbox">
+            <label>
+                <input type="checkbox" id="tg-private-mode" checked>
+                Личные сообщения (ЛС)
+            </label>
+        </div>
+
+        <div class="form-group">
+            <label>Разрешённые Group ID</label>
+            <input type="text" id="tg-groups" placeholder="-1001234567890, -1007778889990">
+            <small>Отвечает только в этих группах (если режим групп включён)</small>
+        </div>
     </div>
     
     <div class="plugin-actions">
@@ -35,6 +62,12 @@
         <button class="btn-secondary" id="tg-toggle" onclick="tgToggleBot()">▶️ Запустить</button>
     </div>
     
+    <div class="plugin-actions" style="margin-top: 10px;">
+        <button class="btn-secondary" id="tg-refresh" onclick="tgRefreshChats()">🔄 Обновить чаты</button>
+        <button class="btn-secondary" id="tg-check-access" onclick="tgCheckAccess()">🔐 Проверить доступ</button>
+    </div>
+
+    <div class="plugin-chats" id="tg-chats"></div>
     <div class="plugin-info" id="tg-info"></div>
 </div>
 
@@ -60,12 +93,27 @@
 .form-group.checkbox label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .plugin-actions { display: flex; gap: 10px; }
 .plugin-actions button { flex: 1; padding: 10px; }
+.plugin-chats { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow: auto; }
+.chat-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px; border: 1px solid var(--border-color); border-radius: 10px; background: rgba(255,255,255,0.02); }
+.chat-avatar {
+    width: 34px; height: 34px; border-radius: 999px; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: #fff; background: linear-gradient(135deg, #5b8cff, #57c7a9); flex: 0 0 34px;
+}
+.chat-main { min-width: 0; flex: 1; }
+.chat-title { font-size: 13px; color: var(--text-primary); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.chat-type { font-size: 11px; color: var(--text-muted); }
+.chat-last { font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-author { font-weight: 600; color: var(--text-primary); }
+.chat-access { font-size: 11px; margin-top: 2px; }
+.chat-access.ok { color: #4ade80; }
+.chat-access.fail { color: #ef4444; }
 .plugin-info { margin-top: 16px; font-size: 12px; color: var(--text-muted); text-align: center; }
 </style>
 
 <script>
 (function() {
     let running = false;
+    let chatAccess = {};
     
     async function tgAction(action, data = {}) {
         const r = await fetch('/api/plugins/telegram-bot/action', {
@@ -91,18 +139,79 @@
             btn.textContent = '▶️ Запустить';
         }
     }
+
+    function escapeHtml(text) {
+        return String(text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function parseIds(raw) {
+        if (!raw || !raw.trim()) return [];
+        return raw
+            .split(',')
+            .map(v => parseInt(v.trim(), 10))
+            .filter(v => !Number.isNaN(v));
+    }
+
+    function accessTextFor(chat) {
+        const item = chatAccess[String(chat.id)];
+        if (!item) return '';
+        const ok = !!(item.access && item.access.ok);
+        const reason = item.access && item.access.reason ? String(item.access.reason) : (ok ? 'ok' : 'no_access');
+        const safeReason = escapeHtml(reason);
+        return `<div class="chat-access ${ok ? 'ok' : 'fail'}">${ok ? '✅ Можно писать' : '❌ Нет доступа'} (${safeReason})</div>`;
+    }
+
+    function avatarFor(chat) {
+        const title = String(chat.title || '').trim();
+        if (title) return escapeHtml(title[0].toUpperCase());
+        return chat.type === 'private' ? 'ЛС' : 'GR';
+    }
+
+    function renderChats(chats) {
+        const root = document.getElementById('tg-chats');
+        if (!chats || !chats.length) {
+            root.innerHTML = '<div class="plugin-info">Пока нет чатов. Напишите боту в Telegram, чтобы они появились.</div>';
+            return;
+        }
+        root.innerHTML = chats.map(chat => `
+            <div class="chat-row">
+                <div class="chat-avatar">${avatarFor(chat)}</div>
+                <div class="chat-main">
+                    <div class="chat-title">
+                        <span>${escapeHtml(chat.title || String(chat.id))}</span>
+                        <span class="chat-type">${escapeHtml(chat.type || 'unknown')}</span>
+                    </div>
+                    <div class="chat-last"><span class="chat-author">${escapeHtml(chat.last_author || '—')}:</span> ${escapeHtml(chat.last_message || '—')}</div>
+                    ${accessTextFor(chat)}
+                </div>
+            </div>
+        `).join('');
+    }
     
     window.tgSaveSettings = async function() {
         const token = document.getElementById('tg-token').value;
         const usersStr = document.getElementById('tg-users').value;
+        const groupsStr = document.getElementById('tg-groups').value;
         const autostart = document.getElementById('tg-autostart').checked;
-        
-        const users = usersStr ? usersStr.split(',').map(u => parseInt(u.trim())).filter(u => !isNaN(u)) : [];
+        const mirrorToWeb = document.getElementById('tg-mirror-web').checked;
+        const groupMode = document.getElementById('tg-group-mode').checked;
+        const privateMode = document.getElementById('tg-private-mode').checked;
+        const users = parseIds(usersStr);
+        const groups = parseIds(groupsStr);
         
         await tgAction('save_settings', {
             bot_token: token,
             allowed_users: users,
-            auto_start: autostart
+            allowed_groups: groups,
+            auto_start: autostart,
+            mirror_to_web: mirrorToWeb,
+            group_mode: groupMode,
+            private_mode: privateMode,
         });
         
         document.getElementById('tg-info').textContent = '✅ Настройки сохранены!';
@@ -115,14 +224,42 @@
         running = result.running;
         updateStatus();
     };
+
+    window.tgRefreshChats = async function() {
+        const result = await tgAction('get_chats');
+        renderChats(result.chats || []);
+    };
+
+    window.tgCheckAccess = async function() {
+        const result = await tgAction('check_access');
+        chatAccess = {};
+        (result.checks || []).forEach(item => {
+            chatAccess[String(item.id)] = item;
+        });
+        const chats = await tgAction('get_chats');
+        renderChats(chats.chats || []);
+    };
     
     // Init
-    tgAction('get_status').then(data => {
-        running = data.running;
+    Promise.all([
+        tgAction('get_status'),
+        fetch('/api/plugins/telegram-bot/window').then(r => r.json())
+    ]).then(([status, wnd]) => {
+        running = status.running;
         updateStatus();
-        
-        if (!data.has_telegram) {
-            document.getElementById('tg-info').innerHTML = 
+
+        const data = wnd.data || {};
+        document.getElementById('tg-token').placeholder = data.token_configured ? 'Токен сохранён (оставь пустым, чтобы не менять)' : '123456:ABC-DEF...';
+        document.getElementById('tg-users').value = (data.allowed_users || []).join(', ');
+        document.getElementById('tg-groups').value = (data.allowed_groups || []).join(', ');
+        document.getElementById('tg-mirror-web').checked = data.mirror_to_web !== false;
+        document.getElementById('tg-group-mode').checked = !!data.group_mode;
+        document.getElementById('tg-private-mode').checked = data.private_mode !== false;
+        document.getElementById('tg-autostart').checked = data.auto_start !== false;
+        renderChats(data.chats || []);
+
+        if (!status.has_telegram) {
+            document.getElementById('tg-info').innerHTML =
                 '⚠️ Требуется установить: <code>pip install python-telegram-bot</code>';
         }
     });

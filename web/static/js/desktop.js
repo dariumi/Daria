@@ -1,5 +1,5 @@
 /**
- * DARIA Desktop v0.8.1
+ * DARIA Desktop v0.8.5
  */
 
 const state = {
@@ -21,6 +21,9 @@ const state = {
 
 const defaultIcons = [
     { id: 'chat', icon: '💬', name: 'Чат', window: 'chat' },
+    { id: 'self', icon: '🪞', name: 'Самоосознание', window: 'self' },
+    { id: 'senses', icon: '👁️', name: 'Сенсоры', window: 'senses' },
+    { id: 'wiki', icon: '📚', name: 'Wiki', window: 'wiki' },
     { id: 'updater', icon: '⬆️', name: 'Обновления', window: 'updater' },
     { id: 'files', icon: '📁', name: 'Файлы', window: 'files' },
     { id: 'terminal', icon: '💻', name: 'Терминал', window: 'terminal' },
@@ -34,6 +37,9 @@ const defaultIcons = [
 
 const windowConfigs = {
     chat: { icon: '💬', title: 'Чат с Дарьей', width: 600, height: 500 },
+    self: { icon: '🪞', title: 'Самоосознание Даши', width: 520, height: 520 },
+    senses: { icon: '👁️', title: 'Сенсоры', width: 560, height: 560 },
+    wiki: { icon: '📚', title: 'Wiki', width: 760, height: 560 },
     updater: { icon: '⬆️', title: 'Обновления', width: 560, height: 540 },
     files: { icon: '📁', title: 'Файлы', width: 550, height: 400 },
     terminal: { icon: '💻', title: 'Терминал', width: 600, height: 400 },
@@ -355,7 +361,7 @@ function showNotification(notif) {
     if (notif.system && 'Notification' in window && Notification.permission === 'granted') {
         const sysNotif = new Notification(notif.title, {
             body: notif.message,
-            icon: '/static/icon.png',
+            icon: '/static/favicon.svg',
             tag: 'daria-' + notif.id,
             requireInteraction: true,
         });
@@ -588,6 +594,9 @@ function addTaskbarItem(windowId, config) {
 
 function initWindowContent(windowId) {
     if (windowId === 'chat') loadChatHistory();
+    else if (windowId === 'self') loadSelfPerception();
+    else if (windowId === 'senses') initSensesWindow();
+    else if (windowId === 'wiki') initWikiWindow();
     else if (windowId === 'updater') initUpdaterWindow();
     else if (windowId === 'settings') initSettingsWindow();
     else if (windowId === 'memory') loadMemoryStats();
@@ -611,7 +620,7 @@ async function loadChatHistory() {
         container.innerHTML = chats.map(c => `
             <div class="chat-history-item ${c.id === state.currentChatId ? 'active' : ''}" 
                  onclick="loadChat('${c.id}')">
-                <span class="chat-preview">${c.preview || 'Новый чат'}</span>
+                <span class="chat-preview">${c.title ? `[${c.title}] ` : ''}${c.preview || 'Новый чат'}</span>
                 <span class="chat-date">${new Date(c.created).toLocaleDateString('ru')}</span>
                 <button class="chat-delete" onclick="deleteChat('${c.id}', event)">×</button>
             </div>
@@ -829,6 +838,8 @@ async function openFile(path) {
         const data = await r.json();
         document.getElementById('file-editor-path').value = path;
         document.getElementById('file-editor-content').value = data.content || '';
+        const promptEl = document.getElementById('file-assist-prompt');
+        if (promptEl) promptEl.value = '';
         document.getElementById('file-editor').classList.remove('hidden');
     } catch (e) {}
 }
@@ -842,6 +853,30 @@ async function saveFile() {
 }
 
 function closeEditor() { document.getElementById('file-editor')?.classList.add('hidden'); }
+
+async function assistFileWithDaria() {
+    const path = document.getElementById('file-editor-path')?.value;
+    const instruction = document.getElementById('file-assist-prompt')?.value?.trim();
+    if (!path || !instruction) return;
+    const contentEl = document.getElementById('file-editor-content');
+    const applyBtn = document.getElementById('file-assist-apply-btn');
+    try {
+        if (applyBtn) applyBtn.disabled = true;
+        const r = await fetch('/api/chat/file-assist', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({path, instruction}),
+        });
+        const data = await r.json();
+        if (data.error) throw new Error(data.error);
+        if (contentEl) contentEl.value = data.content || '';
+        showNotification({title: 'Файл', message: 'Даша подготовила правки', type: 'success', icon: '🌸', duration: 3500});
+    } catch (e) {
+        showNotification({title: 'Файл', message: `Ошибка: ${e.message || e}`, type: 'error', icon: '⚠️', duration: 4500});
+    } finally {
+        if (applyBtn) applyBtn.disabled = false;
+    }
+}
 
 async function createNewFile() {
     const name = prompt('Имя файла:');
@@ -1163,6 +1198,111 @@ async function updaterUpdateAllPlugins() {
     await loadPlugins();
     initDesktopIcons();
     updaterLoadPluginUpdates();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Self / Senses / Wiki
+// ═══════════════════════════════════════════════════════════════
+
+async function loadSelfPerception() {
+    const box = document.getElementById('self-perception-content');
+    if (!box) return;
+    box.innerHTML = '<div class="loading">Загрузка...</div>';
+    try {
+        const r = await fetch('/api/self/perception');
+        const data = await r.json();
+        const state = data.state || {};
+        const traits = data.traits || [];
+        const followups = data.followups || [];
+        box.innerHTML = `
+            <div class="settings-section">
+                <h3>${state.mood_emoji || '🌸'} ${data.self_name || 'Даша'}</h3>
+                <p>Состояние: ${state.mood_label || 'Спокойна'}</p>
+                <p>Энергия: ${Math.round((state.energy || 0.7) * 100)}%</p>
+                <p>Социальная потребность: ${Math.round((state.social_need || 0.5) * 100)}%</p>
+            </div>
+            <div class="settings-section">
+                <h3>Ассоциации и самоощущение</h3>
+                <ul>${traits.map(t => `<li>${t}</li>`).join('')}</ul>
+            </div>
+            <div class="settings-section">
+                <h3>Запланированные напоминания</h3>
+                ${followups.length ? followups.map(f => `<p>• ${f.time}: ${f.message}</p>`).join('') : '<p>Пока нет.</p>'}
+            </div>
+        `;
+    } catch (e) {
+        box.innerHTML = '<div class="empty">Ошибка загрузки</div>';
+    }
+}
+
+async function sensesSee() {
+    const input = document.getElementById('senses-see-input');
+    const out = document.getElementById('senses-output');
+    if (!input?.value?.trim() || !out) return;
+    out.textContent = 'Думаю...';
+    try {
+        const r = await fetch('/api/senses/see', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({description: input.value.trim()}),
+        });
+        const data = await r.json();
+        out.textContent = data.result || data.error || 'Нет ответа';
+    } catch (e) {
+        out.textContent = 'Ошибка анализа';
+    }
+}
+
+async function sensesHear() {
+    const input = document.getElementById('senses-hear-input');
+    const out = document.getElementById('senses-output');
+    if (!input?.value?.trim() || !out) return;
+    out.textContent = 'Слушаю...';
+    try {
+        const r = await fetch('/api/senses/hear', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({transcript: input.value.trim()}),
+        });
+        const data = await r.json();
+        out.textContent = data.result || data.error || 'Нет ответа';
+    } catch (e) {
+        out.textContent = 'Ошибка анализа';
+    }
+}
+
+function initSensesWindow() {
+    const out = document.getElementById('senses-output');
+    if (out) out.textContent = 'Опиши, что ты видишь или слышишь — Даша разберёт смысл.';
+}
+
+async function initWikiWindow() {
+    const list = document.getElementById('wiki-pages');
+    const content = document.getElementById('wiki-body');
+    if (!list || !content) return;
+    list.innerHTML = '<div class="loading">Загрузка...</div>';
+    try {
+        const r = await fetch('/api/wiki/pages');
+        const data = await r.json();
+        const pages = data.pages || [];
+        list.innerHTML = pages.map(p => `<button onclick="loadWikiPage('${p}')">${p}</button>`).join('') || '<div class="empty">Страниц нет</div>';
+        if (pages.length) loadWikiPage(pages[0]);
+    } catch (e) {
+        list.innerHTML = '<div class="empty">Ошибка загрузки</div>';
+    }
+}
+
+async function loadWikiPage(name) {
+    const content = document.getElementById('wiki-body');
+    if (!content) return;
+    content.textContent = 'Загрузка...';
+    try {
+        const r = await fetch(`/api/wiki/page?name=${encodeURIComponent(name)}`);
+        const data = await r.json();
+        content.textContent = data.content || data.error || 'Пусто';
+    } catch (e) {
+        content.textContent = 'Ошибка чтения страницы';
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════

@@ -40,6 +40,9 @@
         <div class="start-header"><div class="start-avatar">🌸</div><div><div class="start-name">Дарья</div><div class="start-version">v{{ version }}</div></div></div>
         <div class="start-items">
             <div class="start-item" onclick="openWindow('chat');toggleStartMenu()"><span>💬</span>Чат</div>
+            <div class="start-item" onclick="openWindow('self');toggleStartMenu()"><span>🪞</span>Самоосознание</div>
+            <div class="start-item" onclick="openWindow('senses');toggleStartMenu()"><span>👁️</span>Сенсоры</div>
+            <div class="start-item" onclick="openWindow('wiki');toggleStartMenu()"><span>📚</span>Wiki</div>
             <div class="start-item" onclick="openWindow('updater');toggleStartMenu()"><span>⬆️</span>Обновления</div>
             <div class="start-item" onclick="openWindow('files');toggleStartMenu()"><span>📁</span>Файлы</div>
             <div class="start-item" onclick="openWindow('terminal');toggleStartMenu()"><span>💻</span>Терминал</div>
@@ -114,7 +117,49 @@
                     <button onclick="saveFile()">💾</button>
                     <button onclick="closeEditor()">✖</button>
                 </div>
+                <div class="editor-header">
+                    <input type="text" id="file-assist-prompt" placeholder="Попроси Дашу: исправь ошибки / перепиши стиль / сделай кратко...">
+                    <button id="file-assist-apply-btn" onclick="assistFileWithDaria()">🌸 Применить</button>
+                </div>
                 <textarea id="file-editor-content"></textarea>
+            </div>
+        </div>
+    </template>
+
+    <template id="self-content">
+        <div id="self-perception-content" class="settings-container">
+            <div class="loading">Загрузка...</div>
+        </div>
+    </template>
+
+    <template id="senses-content">
+        <div class="settings-container">
+            <div class="settings-section">
+                <h3>👁️ Что Даша видит</h3>
+                <div class="setting-row">
+                    <input id="senses-see-input" type="text" placeholder="Опиши картинку или экран...">
+                    <button onclick="sensesSee()">Анализ</button>
+                </div>
+            </div>
+            <div class="settings-section">
+                <h3>👂 Что Даша слышит</h3>
+                <div class="setting-row">
+                    <input id="senses-hear-input" type="text" placeholder="Вставь расшифровку речи/звука...">
+                    <button onclick="sensesHear()">Понять</button>
+                </div>
+            </div>
+            <div class="settings-section">
+                <h3>Результат</h3>
+                <pre id="senses-output">—</pre>
+            </div>
+        </div>
+    </template>
+
+    <template id="wiki-content">
+        <div class="chat-container">
+            <div class="chat-sidebar" id="wiki-pages"></div>
+            <div class="chat-main">
+                <pre id="wiki-body" style="height:100%;overflow:auto;padding:14px;white-space:pre-wrap;"></pre>
             </div>
         </div>
     </template>
@@ -192,7 +237,7 @@
                 <div class="setting-row"><label>Режим</label><select id="setting-mode"><option value="adaptive">Адаптивный</option><option value="companion">Подруга</option><option value="assistant">Помощник</option></select></div>
                 <div class="setting-row"><label>Внимание</label><input type="checkbox" id="setting-attention" checked></div>
                 <div class="setting-row"><label>Показывать настроение</label><input type="checkbox" id="setting-show-mood" checked></div>
-                <div class="setting-row"><label>LLM</label><span id="llm-status">—</span></div>
+                <div class="setting-row"><label>Разум (LLM)</label><span id="llm-status">—</span></div>
             </div>
             <button class="btn-primary" onclick="saveSettings()">💾 Сохранить</button>
         </div>
