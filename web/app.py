@@ -1,5 +1,5 @@
 """
-DARIA Web App v0.8.5
+DARIA Web App v0.8.5.1
 Chat history, attention system, proactive messaging, mood behaviors
 """
 
@@ -350,13 +350,13 @@ class AttentionThread(threading.Thread):
 #  Flask App
 # ═══════════════════════════════════════════════════════════════════
 
-VERSION = "0.8.5"
+VERSION = "0.8.5.1"
 
 app = Flask(__name__,
     template_folder=str(Path(__file__).parent / "templates"),
     static_folder=str(Path(__file__).parent / "static")
 )
-app.config['SECRET_KEY'] = 'daria-secret-v0.8.5'
+app.config['SECRET_KEY'] = 'daria-secret-v0.8.5.1'
 app.config['JSON_AS_ASCII'] = False
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
@@ -576,6 +576,23 @@ def api_self_perception():
         "state": {},
         "followups": [],
     })
+
+
+@app.route("/api/self/instruction", methods=["GET", "POST"])
+def api_self_instruction():
+    brain = get_brain()
+    if not brain:
+        return jsonify({"error": "Brain unavailable"}), 503
+    if request.method == "GET":
+        if hasattr(brain, "get_self_instruction"):
+            return jsonify({"instruction": brain.get_self_instruction()})
+        return jsonify({"instruction": ""})
+    data = request.get_json() or {}
+    text = (data.get("instruction") or "").strip()
+    if hasattr(brain, "set_self_instruction"):
+        saved = brain.set_self_instruction(text)
+        return jsonify({"status": "ok", "instruction": saved})
+    return jsonify({"error": "Unsupported"}), 500
 
 
 @app.route("/api/toast", methods=["POST"])
@@ -1077,11 +1094,19 @@ def api_logs_stream():
                     yield f"data: {json.dumps(q.get(timeout=30))}\n\n"
                 except queue.Empty:
                     yield ": keepalive\n\n"
-        except GeneratorExit:
+        except (GeneratorExit, OSError, ConnectionError):
             pass
         finally:
             web_log_handler.unsubscribe(q)
-    return Response(generate(), mimetype='text/event-stream')
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.route("/api/notifications")
@@ -1109,11 +1134,19 @@ def api_notifications_stream():
                     yield f"data: {json.dumps(q.get(timeout=30))}\n\n"
                 except queue.Empty:
                     yield ": keepalive\n\n"
-        except GeneratorExit:
+        except (GeneratorExit, OSError, ConnectionError):
             pass
         finally:
             notifications.unsubscribe(q)
-    return Response(generate(), mimetype='text/event-stream')
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.route("/api/system/info")
@@ -1419,7 +1452,8 @@ def run_server(host: str = "127.0.0.1", port: int = 8000,
     # Start attention thread
     settings = load_settings()
     attention_thread.enabled = settings.get("attention_enabled", True)
-    attention_thread.start()
+    if not attention_thread.is_alive():
+        attention_thread.start()
     
     notifications.add("DARIA", f"Система запущена v{VERSION}", "success", "🌸", 8000)
     logger.info("Ready!")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🌸 DARIA v0.8.5 - AI Desktop Companion
+🌸 DARIA v0.8.5.1 - AI Desktop Companion
 """
 
 import sys
@@ -25,7 +25,7 @@ def get_version() -> str:
     version_file = Path(__file__).parent / 'VERSION'
     if version_file.exists():
         return version_file.read_text().strip()
-    return '0.8.5'
+    return '0.8.5.1'
 
 VERSION = get_version()
 

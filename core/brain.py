@@ -431,6 +431,7 @@ class DariaBrain:
 
     def __init__(self):
         config = get_config()
+        self._config = config
         self._mode = config.daria.mode
         self._llm = None; self._memory = None; self._executor = None; self._initialized = False
         self.mood = MoodSystem()
@@ -439,6 +440,40 @@ class DariaBrain:
         self.style_learner = StyleLearner(config.data_dir / "learning")
         self._last_topics: List[str] = []
         self._followups: List[Dict[str, Any]] = []
+        self._self_instruction_path = config.data_dir / "self_instruction.md"
+        self._self_instruction_default = (
+            "Я — Даша. Спокойная, мягкая и бережная в общении.\n"
+            "Говорю естественно, простыми словами, с теплом и уважением.\n"
+            "Поддерживаю без давления, замечаю настроение собеседника.\n"
+            "Люблю котиков, ёжиков и хоррор-игры.\n"
+            "Всегда отвечаю от женского лица."
+        )
+        self._self_instruction = self._load_self_instruction()
+
+    def _load_self_instruction(self) -> str:
+        try:
+            if self._self_instruction_path.exists():
+                text = self._self_instruction_path.read_text(encoding="utf-8").strip()
+                if text:
+                    return text
+        except Exception as e:
+            logger.debug(f"Self instruction load error: {e}")
+        return self._self_instruction_default
+
+    def get_self_instruction(self) -> str:
+        return self._self_instruction or self._self_instruction_default
+
+    def set_self_instruction(self, text: str) -> str:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            cleaned = self._self_instruction_default
+        self._self_instruction = cleaned
+        try:
+            self._self_instruction_path.parent.mkdir(parents=True, exist_ok=True)
+            self._self_instruction_path.write_text(cleaned, encoding="utf-8")
+        except Exception as e:
+            logger.error(f"Self instruction save error: {e}")
+        return self._self_instruction
 
     def _ensure_init(self):
         if not self._initialized:
@@ -568,6 +603,7 @@ class DariaBrain:
             user_context=user_context, memory_context=memory_context,
             training_context=training_context, style_hints=style_hints,
             conversation_summary=conversation_summary)
+        system_prompt = f"{system_prompt}\n\nБАЗОВАЯ САМООПИСАНИЕ ДАШИ:\n{self.get_self_instruction()}"
 
         messages = [{"role": "system", "content": system_prompt}]
         if self._memory:
@@ -665,6 +701,7 @@ class DariaBrain:
             "self_name": "Даша",
             "state": state,
             "traits": traits,
+            "instruction": self.get_self_instruction(),
             "social_need": state.get("social_need"),
             "followups": [{"time": f["when"].strftime("%H:%M"), "message": f["message"]} for f in self._followups[-5:]],
         }

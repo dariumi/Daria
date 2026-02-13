@@ -1,5 +1,5 @@
 /**
- * DARIA Desktop v0.8.5
+ * DARIA Desktop v0.8.5.1
  */
 
 const state = {
@@ -339,10 +339,27 @@ function initNotifications() {
         Notification.requestPermission();
     }
     
-    try {
-        const es = new EventSource('/api/notifications/stream');
-        es.onmessage = (e) => showNotification(JSON.parse(e.data));
-    } catch (e) {}
+    let reconnectMs = 1000;
+    const connect = () => {
+        let es;
+        try {
+            es = new EventSource('/api/notifications/stream');
+        } catch (e) {
+            setTimeout(connect, reconnectMs);
+            reconnectMs = Math.min(15000, reconnectMs * 2);
+            return;
+        }
+        es.onmessage = (e) => {
+            reconnectMs = 1000;
+            try { showNotification(JSON.parse(e.data)); } catch (_) {}
+        };
+        es.onerror = () => {
+            try { es.close(); } catch (_) {}
+            setTimeout(connect, reconnectMs);
+            reconnectMs = Math.min(15000, reconnectMs * 2);
+        };
+    };
+    connect();
 }
 
 function showNotification(notif) {
@@ -1215,24 +1232,145 @@ async function loadSelfPerception() {
         const traits = data.traits || [];
         const followups = data.followups || [];
         box.innerHTML = `
-            <div class="settings-section">
-                <h3>${state.mood_emoji || '🌸'} ${data.self_name || 'Даша'}</h3>
-                <p>Состояние: ${state.mood_label || 'Спокойна'}</p>
-                <p>Энергия: ${Math.round((state.energy || 0.7) * 100)}%</p>
-                <p>Социальная потребность: ${Math.round((state.social_need || 0.5) * 100)}%</p>
-            </div>
-            <div class="settings-section">
-                <h3>Ассоциации и самоощущение</h3>
-                <ul>${traits.map(t => `<li>${t}</li>`).join('')}</ul>
-            </div>
-            <div class="settings-section">
-                <h3>Запланированные напоминания</h3>
-                ${followups.length ? followups.map(f => `<p>• ${f.time}: ${f.message}</p>`).join('') : '<p>Пока нет.</p>'}
+            <div class="self-grid">
+                <section class="self-card">
+                    <h3>${state.mood_emoji || '🌸'} ${data.self_name || 'Даша'}</h3>
+                    <p>Состояние: ${state.mood_label || 'Спокойна'}</p>
+                    <p>Энергия: ${Math.round((state.energy || 0.7) * 100)}%</p>
+                    <p>Социальная потребность: ${Math.round((state.social_need || 0.5) * 100)}%</p>
+                </section>
+                <section class="self-card">
+                    <h3>Кто я сейчас</h3>
+                    <ul>${traits.map(t => `<li>${t}</li>`).join('')}</ul>
+                </section>
+                <section class="self-card self-instruction-card">
+                    <h3>Базовая инструкция самосознания</h3>
+                    <p class="self-note">Этот текст формирует самоощущение Даши. Его можно менять под ваш стиль.</p>
+                    <textarea id="self-instruction-input" class="self-instruction-input" placeholder="Опиши характер Даши..."></textarea>
+                    <div class="self-actions">
+                        <button class="btn-primary" onclick="saveSelfInstruction()">💾 Сохранить</button>
+                        <button onclick="loadSelfInstruction()">↻ Обновить</button>
+                    </div>
+                    <div id="self-instruction-info" class="self-note"></div>
+                </section>
+                <section class="self-card">
+                    <h3>Запланированные напоминания</h3>
+                    ${followups.length ? followups.map(f => `<p>• ${f.time}: ${f.message}</p>`).join('') : '<p>Пока нет.</p>'}
+                </section>
             </div>
         `;
+        const input = document.getElementById('self-instruction-input');
+        if (input) input.value = data.instruction || '';
     } catch (e) {
         box.innerHTML = '<div class="empty">Ошибка загрузки</div>';
     }
+}
+
+async function loadSelfInstruction() {
+    const input = document.getElementById('self-instruction-input');
+    if (!input) return;
+    try {
+        const r = await fetch('/api/self/instruction');
+        const data = await r.json();
+        input.value = data.instruction || '';
+    } catch (e) {}
+}
+
+async function saveSelfInstruction() {
+    const input = document.getElementById('self-instruction-input');
+    const info = document.getElementById('self-instruction-info');
+    if (!input) return;
+    if (info) info.textContent = 'Сохраняю...';
+    try {
+        const r = await fetch('/api/self/instruction', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({instruction: input.value}),
+        });
+        const data = await r.json();
+        if (info) info.textContent = data.status === 'ok' ? 'Сохранено.' : (data.error || 'Ошибка');
+    } catch (e) {
+        if (info) info.textContent = 'Ошибка соединения';
+    }
+}
+
+function mdToHtml(md) {
+    const safeHref = (url) => {
+        const u = String(url || '').trim();
+        if (!u) return '#';
+        if (u.startsWith('/')) return u;
+        if (/^https?:\/\//i.test(u)) return u;
+        return '#';
+    };
+    const esc = (s) => String(s || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    const inline = (s) => esc(s)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, link) => `<a href="${safeHref(link)}" target="_blank" rel="noopener">${label}</a>`);
+
+    const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
+    let html = '';
+    let inCode = false;
+    let inUl = false;
+    let inOl = false;
+
+    const closeLists = () => {
+        if (inUl) { html += '</ul>'; inUl = false; }
+        if (inOl) { html += '</ol>'; inOl = false; }
+    };
+
+    for (const line of lines) {
+        if (line.startsWith('```')) {
+            closeLists();
+            html += inCode ? '</code></pre>' : '<pre><code>';
+            inCode = !inCode;
+            continue;
+        }
+        if (inCode) {
+            html += `${esc(line)}\n`;
+            continue;
+        }
+        if (/^\s*$/.test(line)) {
+            closeLists();
+            html += '<br>';
+            continue;
+        }
+        if (/^#{1,6}\s+/.test(line)) {
+            closeLists();
+            const level = line.match(/^#+/)[0].length;
+            html += `<h${level}>${inline(line.replace(/^#{1,6}\s+/, ''))}</h${level}>`;
+            continue;
+        }
+        if (/^>\s?/.test(line)) {
+            closeLists();
+            html += `<blockquote>${inline(line.replace(/^>\s?/, ''))}</blockquote>`;
+            continue;
+        }
+        if (/^\d+\.\s+/.test(line)) {
+            if (!inOl) { closeLists(); html += '<ol>'; inOl = true; }
+            html += `<li>${inline(line.replace(/^\d+\.\s+/, ''))}</li>`;
+            continue;
+        }
+        if (/^[-*]\s+/.test(line)) {
+            if (!inUl) { closeLists(); html += '<ul>'; inUl = true; }
+            html += `<li>${inline(line.replace(/^[-*]\s+/, ''))}</li>`;
+            continue;
+        }
+        closeLists();
+        if (/^---+$/.test(line.trim())) {
+            html += '<hr>';
+            continue;
+        }
+        html += `<p>${inline(line)}</p>`;
+    }
+    if (inCode) html += '</code></pre>';
+    if (inUl) html += '</ul>';
+    if (inOl) html += '</ol>';
+    return html;
 }
 
 async function sensesSee() {
@@ -1295,11 +1433,15 @@ async function initWikiWindow() {
 async function loadWikiPage(name) {
     const content = document.getElementById('wiki-body');
     if (!content) return;
-    content.textContent = 'Загрузка...';
+    content.innerHTML = '<div class="loading">Загрузка...</div>';
     try {
         const r = await fetch(`/api/wiki/page?name=${encodeURIComponent(name)}`);
         const data = await r.json();
-        content.textContent = data.content || data.error || 'Пусто';
+        if (data.content) {
+            content.innerHTML = `<article class="wiki-markdown">${mdToHtml(data.content)}</article>`;
+        } else {
+            content.textContent = data.error || 'Пусто';
+        }
     } catch (e) {
         content.textContent = 'Ошибка чтения страницы';
     }

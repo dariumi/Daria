@@ -159,7 +159,7 @@
         <div class="chat-container">
             <div class="chat-sidebar" id="wiki-pages"></div>
             <div class="chat-main">
-                <pre id="wiki-body" style="height:100%;overflow:auto;padding:14px;white-space:pre-wrap;"></pre>
+                <div id="wiki-body" style="height:100%;overflow:auto;"></div>
             </div>
         </div>
     </template>
@@ -167,7 +167,7 @@
     <template id="terminal-content">
         <div class="terminal-container">
             <div class="terminal-output" id="terminal-output">
-                <div class="term-line">DARIA Terminal v0.8.1</div>
+                <div class="term-line">DARIA Terminal v0.8.5.1</div>
                 <div class="term-line">Введи help для команд</div>
             </div>
             <div class="terminal-input"><span>$</span><input type="text" id="terminal-input" onkeypress="if(event.key==='Enter')executeTerminal()"></div>

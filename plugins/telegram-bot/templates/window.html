@@ -116,12 +116,21 @@
     let chatAccess = {};
     
     async function tgAction(action, data = {}) {
-        const r = await fetch('/api/plugins/telegram-bot/action', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({action, data})
-        });
-        return r.json();
+        try {
+            const r = await fetch('/api/plugins/telegram-bot/action', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action, data})
+            });
+            if (!r.ok) {
+                return {error: `HTTP ${r.status}`, status: 'error'};
+            }
+            return r.json();
+        } catch (e) {
+            const info = document.getElementById('tg-info');
+            if (info) info.textContent = '⚠️ Сервер недоступен. Проверь, запущена ли DARIA.';
+            return {error: 'network_error', status: 'error'};
+        }
     }
     
     function updateStatus() {
@@ -221,30 +230,39 @@
     window.tgToggleBot = async function() {
         const action = running ? 'stop_bot' : 'start_bot';
         const result = await tgAction(action);
+        if (result.error) return;
         running = result.running;
         updateStatus();
     };
 
     window.tgRefreshChats = async function() {
         const result = await tgAction('get_chats');
+        if (result.error) return;
         renderChats(result.chats || []);
     };
 
     window.tgCheckAccess = async function() {
         const result = await tgAction('check_access');
+        if (result.error) return;
         chatAccess = {};
         (result.checks || []).forEach(item => {
             chatAccess[String(item.id)] = item;
         });
         const chats = await tgAction('get_chats');
+        if (chats.error) return;
         renderChats(chats.chats || []);
     };
     
     // Init
     Promise.all([
         tgAction('get_status'),
-        fetch('/api/plugins/telegram-bot/window').then(r => r.json())
+        fetch('/api/plugins/telegram-bot/window').then(r => r.ok ? r.json() : ({data: {}, error: `HTTP ${r.status}`})).catch(() => ({data: {}, error: 'network_error'}))
     ]).then(([status, wnd]) => {
+        if (status.error || wnd.error) {
+            const info = document.getElementById('tg-info');
+            if (info) info.textContent = '⚠️ Не удалось подключиться к серверу DARIA.';
+            return;
+        }
         running = status.running;
         updateStatus();
 
