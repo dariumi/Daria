@@ -1,5 +1,5 @@
 """
-DARIA Web App v0.8.5.1
+DARIA Web App v0.8.6.4
 Chat history, attention system, proactive messaging, mood behaviors
 """
 
@@ -15,6 +15,12 @@ import tempfile
 import tarfile
 import zipfile
 import re
+import io
+import csv
+import atexit
+import random
+import urllib.request
+import urllib.parse
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
@@ -73,6 +79,13 @@ logging.getLogger().addHandler(web_log_handler)
 logging.getLogger("daria").addHandler(web_log_handler)
 logger = logging.getLogger("daria.web")
 
+try:
+    from PIL import Image
+    HAS_PIL = True
+except Exception:
+    Image = None
+    HAS_PIL = False
+
 # ═══════════════════════════════════════════════════════════════════
 #  Notifications
 # ═══════════════════════════════════════════════════════════════════
@@ -86,6 +99,7 @@ class NotificationManager:
     
     def add(self, title: str, message: str, type: str = "info", 
             icon: str = "💬", duration: int = 5000, action: str = None,
+            action_data: Optional[Dict[str, Any]] = None,
             system: bool = False) -> Dict:
         """
         Add notification
@@ -97,6 +111,7 @@ class NotificationManager:
                 "id": self._id, "title": title, "message": message,
                 "type": type, "icon": icon, "duration": duration,
                 "action": action, "timestamp": datetime.now().isoformat(),
+                "action_data": action_data or {},
                 "system": system,  # NEW: trigger system notification
             }
             self.notifications.append(notif)
@@ -124,6 +139,666 @@ class NotificationManager:
 
 
 notifications = NotificationManager()
+
+
+class TaskManager:
+    """User and Daria task lists with daily rollover and background execution."""
+    BASE_DASHA_TASKS = [
+        {"title": "Послушать новую музыку", "type": "listen_music"},
+        {"title": "Сделать заметку о настроении", "type": "write_note"},
+        {"title": "Почитать книгу", "type": "read_book"},
+        {"title": "Поиграть в мини-игру", "type": "play_game"},
+        {"title": "Почитать wiki-страницу", "type": "read_wiki"},
+        {"title": "Навести порядок в файлах", "type": "create_file"},
+    ]
+
+    def __init__(self, data_dir: Path):
+        self.path = data_dir / "tasks.json"
+        self.lock = threading.RLock()
+        self.data = self._load()
+
+    def _today(self) -> str:
+        return datetime.now().strftime("%Y-%m-%d")
+
+    def _load(self) -> Dict[str, Any]:
+        if self.path.exists():
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return self._ensure_schema(data)
+            except Exception:
+                pass
+        return self._ensure_schema({})
+
+    def _ensure_schema(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(data, dict):
+            data = {}
+        data.setdefault("date", self._today())
+        if not isinstance(data.get("user_tasks"), list):
+            data["user_tasks"] = []
+        if not isinstance(data.get("dasha_tasks"), list):
+            data["dasha_tasks"] = []
+        if not isinstance(data.get("activity_log"), list):
+            data["activity_log"] = []
+        if not isinstance(data.get("current_task"), dict):
+            data["current_task"] = {}
+        return data
+
+    def _save(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _new_task(self, title: str, task_type: str, source: str) -> Dict[str, Any]:
+        return {
+            "id": str(uuid.uuid4())[:8],
+            "title": title.strip(),
+            "type": task_type,
+            "source": source,
+            "done": False,
+            "created": datetime.now().isoformat(),
+            "updated": datetime.now().isoformat(),
+        }
+
+    def rollover_if_needed(self):
+        with self.lock:
+            self.data = self._ensure_schema(self.data)
+            today = self._today()
+            if self.data.get("date") == today:
+                return
+            remaining = [t for t in self.data.get("dasha_tasks", []) if not t.get("done")]
+            for t in remaining:
+                t["updated"] = datetime.now().isoformat()
+            self.data = {
+                "date": today,
+                "user_tasks": [t for t in self.data.get("user_tasks", []) if not t.get("done")],
+                "dasha_tasks": remaining,
+                "activity_log": list(self.data.get("activity_log", []))[-120:],
+                "current_task": {},
+            }
+            self._save()
+
+    def list_all(self) -> Dict[str, Any]:
+        with self.lock:
+            self.data = self._ensure_schema(self.data)
+            self.rollover_if_needed()
+            return {
+                "date": self.data.get("date"),
+                "user_tasks": list(self.data.get("user_tasks", [])),
+                "dasha_tasks": list(self.data.get("dasha_tasks", [])),
+                "current_task": dict(self.data.get("current_task", {})),
+                "activity_log": list(self.data.get("activity_log", []))[-20:],
+                "base_types": [t["type"] for t in self.BASE_DASHA_TASKS],
+            }
+
+    def set_current(self, task: Dict[str, Any]):
+        with self.lock:
+            self.data = self._ensure_schema(self.data)
+            self.data["current_task"] = {
+                "id": task.get("id"),
+                "title": task.get("title"),
+                "type": task.get("type"),
+                "started_at": datetime.now().isoformat(),
+            }
+            self._save()
+
+    def add_activity(self, title: str, details: str = "", status: str = "done"):
+        with self.lock:
+            self.data = self._ensure_schema(self.data)
+            self.data["activity_log"].append({
+                "title": title,
+                "details": details,
+                "status": status,
+                "timestamp": datetime.now().isoformat(),
+            })
+            self.data["activity_log"] = self.data["activity_log"][-120:]
+            self._save()
+
+    def clear_current(self):
+        with self.lock:
+            self.data = self._ensure_schema(self.data)
+            self.data["current_task"] = {}
+            self._save()
+
+    def plans_summary(self) -> str:
+        with self.lock:
+            self.data = self._ensure_schema(self.data)
+            self.rollover_if_needed()
+            open_tasks = [t for t in self.data.get("dasha_tasks", []) if not t.get("done")]
+            done_tasks = [t for t in self.data.get("dasha_tasks", []) if t.get("done")]
+            lines = [f"Планы на {self.data.get('date') or self._today()}:"]
+            if not open_tasks:
+                lines.append("• Пока нет активных дел.")
+            else:
+                for t in open_tasks[:10]:
+                    lines.append(f"• {t.get('title', 'Без названия')}")
+            if done_tasks:
+                lines.append(f"Выполнено: {len(done_tasks)}")
+            return "\n".join(lines)
+
+    def add_user_task(self, title: str, task_type: str = "custom") -> Dict[str, Any]:
+        with self.lock:
+            self.data = self._ensure_schema(self.data)
+            self.rollover_if_needed()
+            task = self._new_task(title, task_type, "user")
+            self.data["user_tasks"].append(task)
+            self._save()
+            return task
+
+    def add_dasha_task(self, title: str, task_type: str = "custom") -> Dict[str, Any]:
+        with self.lock:
+            self.data = self._ensure_schema(self.data)
+            self.rollover_if_needed()
+            task = self._new_task(title, task_type, "dasha")
+            self.data["dasha_tasks"].append(task)
+            self._save()
+            return task
+
+    def toggle(self, task_id: str, done: bool) -> bool:
+        with self.lock:
+            self.data = self._ensure_schema(self.data)
+            for bucket in ("user_tasks", "dasha_tasks"):
+                for t in self.data.get(bucket, []):
+                    if t.get("id") == task_id:
+                        t["done"] = bool(done)
+                        t["updated"] = datetime.now().isoformat()
+                        self._save()
+                        return True
+        return False
+
+    def delete(self, task_id: str) -> bool:
+        with self.lock:
+            self.data = self._ensure_schema(self.data)
+            changed = False
+            for bucket in ("user_tasks", "dasha_tasks"):
+                old = self.data.get(bucket, [])
+                new = [t for t in old if t.get("id") != task_id]
+                if len(new) != len(old):
+                    self.data[bucket] = new
+                    changed = True
+            if changed:
+                self._save()
+            return changed
+
+    def generate_dasha_day(self) -> List[Dict[str, Any]]:
+        with self.lock:
+            self.data = self._ensure_schema(self.data)
+            self.rollover_if_needed()
+            existing_open = [t for t in self.data.get("dasha_tasks", []) if not t.get("done")]
+            if len(existing_open) >= 4:
+                return self.data.get("dasha_tasks", [])
+            needed = max(0, 4 - len(existing_open))
+            candidates = self.BASE_DASHA_TASKS[:]
+            random.shuffle(candidates)
+            for item in candidates[:needed]:
+                self.data["dasha_tasks"].append(self._new_task(item["title"], item["type"], "dasha"))
+            self._save()
+            return self.data.get("dasha_tasks", [])
+
+    def next_dasha_task(self) -> Optional[Dict[str, Any]]:
+        with self.lock:
+            self.data = self._ensure_schema(self.data)
+            self.rollover_if_needed()
+            for t in self.data.get("dasha_tasks", []):
+                if not t.get("done"):
+                    return t
+        return None
+
+    def complete(self, task_id: str):
+        self.toggle(task_id, True)
+
+
+class DariaGameManager:
+    """Live games with system/user/Dasha roles."""
+    WORDS = [
+        "ночь", "фонарь", "дождь", "ветер", "книга", "огонь", "тишина",
+        "эхо", "звезда", "комната", "шаги", "тайна", "сигнал", "подвал",
+    ]
+    BATTLE_SHIPS = [4, 3, 3, 2, 2, 2, 1, 1, 1, 1]
+
+    def __init__(self):
+        self.lock = threading.RLock()
+        self.state: Dict[str, Any] = self._base_state()
+
+    def _base_state(self) -> Dict[str, Any]:
+        return {
+            "running": False,
+            "mode": "associations",
+            "game": "Ассоциации",
+            "reason": "",
+            "opponent": "bot",
+            "started_at": None,
+            "last_tick": 0.0,
+            "turn": 0,
+            "score_dasha": 0,
+            "score_shadow": 0,
+            "moves": [],
+            "winner": "",
+            "reward": "",
+            "battleship": {},
+            "maze": {},
+        }
+
+    def _append_move(self, author: str, text: str, role: str = ""):
+        self.state["moves"].append({
+            "author": author,
+            "role": role or author.lower(),
+            "text": text,
+            "ts": datetime.now().isoformat(),
+        })
+        self.state["moves"] = self.state["moves"][-140:]
+
+    @staticmethod
+    def _new_grid(size: int, fill: int = 0) -> List[List[int]]:
+        return [[fill for _ in range(size)] for _ in range(size)]
+
+    @staticmethod
+    def _coord_from_str(token: str) -> Optional[tuple]:
+        m = re.match(r"^\s*([A-Ja-jА-Яа-я])\s*([1-9]|10)\s*$", token or "")
+        if not m:
+            return None
+        col = ord(m.group(1).upper()) - ord("A")
+        row = int(m.group(2)) - 1
+        if 0 <= row < 10 and 0 <= col < 10:
+            return row, col
+        return None
+
+    @staticmethod
+    def _coord_to_str(r: int, c: int) -> str:
+        return f"{chr(ord('A') + c)}{r + 1}"
+
+    def _can_place_ship(self, grid: List[List[int]], r: int, c: int, length: int, horiz: bool) -> bool:
+        size = len(grid)
+        cells = []
+        for i in range(length):
+            rr = r
+            cc = c + i if horiz else c
+            rr = r + i if not horiz else r
+            if rr < 0 or rr >= size or cc < 0 or cc >= size or grid[rr][cc] != 0:
+                return False
+            cells.append((rr, cc))
+        for rr, cc in cells:
+            for dr in (-1, 0, 1):
+                for dc in (-1, 0, 1):
+                    nr, nc = rr + dr, cc + dc
+                    if 0 <= nr < size and 0 <= nc < size and grid[nr][nc] == 1 and (nr, nc) not in cells:
+                        return False
+        return True
+
+    def _place_ship(self, grid: List[List[int]], r: int, c: int, length: int, horiz: bool) -> bool:
+        if not self._can_place_ship(grid, r, c, length, horiz):
+            return False
+        for i in range(length):
+            rr = r
+            cc = c + i if horiz else c
+            rr = r + i if not horiz else r
+            grid[rr][cc] = 1
+        return True
+
+    def _random_place_all(self, size: int = 10) -> List[List[int]]:
+        g = self._new_grid(size, 0)
+        for length in self.BATTLE_SHIPS:
+            placed = False
+            for _ in range(400):
+                r = random.randint(0, size - 1)
+                c = random.randint(0, size - 1)
+                horiz = bool(random.randint(0, 1))
+                if self._place_ship(g, r, c, length, horiz):
+                    placed = True
+                    break
+            if not placed:
+                return self._random_place_all(size=size)
+        return g
+
+    def _count_alive_ship_cells(self, grid: List[List[int]]) -> int:
+        return sum(1 for row in grid for x in row if x == 1)
+
+    def _start_associations(self, reason: str, opponent: str):
+        self.state.update({
+            "running": True, "mode": "associations", "game": "Ассоциации",
+            "reason": reason, "opponent": opponent, "started_at": datetime.now().isoformat(),
+            "last_tick": time.time(), "turn": 0, "score_dasha": 0, "score_shadow": 0,
+            "moves": [], "winner": "", "reward": "",
+        })
+        self._append_move("Система", "Игра «Ассоциации» началась.", role="system")
+        self._append_move("Даша", "Начинаю с слова: ночь 🌙", role="dasha")
+
+    def _start_maze(self, reason: str, opponent: str):
+        size = 10
+        maze = self._new_grid(size, 0)
+        for r in range(size):
+            for c in range(size):
+                if (r, c) in ((0, 0), (size - 1, size - 1)):
+                    continue
+                if random.random() < 0.18:
+                    maze[r][c] = 1
+        self.state.update({
+            "running": True, "mode": "maze2d", "game": "2D Лабиринт",
+            "reason": reason, "opponent": opponent, "started_at": datetime.now().isoformat(),
+            "last_tick": time.time(), "turn": 0, "score_dasha": 0, "score_shadow": 0,
+            "moves": [], "winner": "", "reward": "",
+            "maze": {"grid": maze, "pos": [0, 0], "goal": [size - 1, size - 1]},
+        })
+        self._append_move("Система", "2D-лабиринт запущен. Цель: дойти до выхода.", role="system")
+        self._append_move("Даша", "Пойду аккуратно по клеточкам 🧭", role="dasha")
+
+    def _start_battleship(self, reason: str, opponent: str):
+        dasha_board = self._random_place_all(10)
+        enemy_board = self._random_place_all(10)
+        self.state.update({
+            "running": True, "mode": "battleship", "game": "Морской бой",
+            "reason": reason, "opponent": opponent, "started_at": datetime.now().isoformat(),
+            "last_tick": time.time(), "turn": 0, "score_dasha": 0, "score_shadow": 0,
+            "moves": [], "winner": "", "reward": "",
+            "battleship": {
+                "size": 10,
+                "dasha_board": dasha_board,
+                "enemy_board": enemy_board,
+                "dasha_view": self._new_grid(10, -1),  # -1 unknown, 0 miss, 1 hit
+                "enemy_shots": self._new_grid(10, 0),  # 0 none, 1 miss, 2 hit
+                "dasha_shots": self._new_grid(10, 0),  # 0 none, 1 miss, 2 hit
+                "turn_owner": "dasha",
+                "hints": [],
+                "pending_user_shot": "",
+            },
+        })
+        self._append_move("Система", "Морской бой запущен. Поле 10x10, корабли расставлены честно по правилам.", role="system")
+        self._append_move(
+            "Система",
+            "Правила: корабли только вертикально/горизонтально, между кораблями минимум 1 клетка.",
+            role="system",
+        )
+        self._append_move("Даша", "Я расставила корабли. Начинаю первой и делаю ход.", role="dasha")
+
+    def start_game(self, reason: str = "manual", mode: str = "associations", opponent: str = "bot") -> Dict[str, Any]:
+        with self.lock:
+            mode = (mode or "associations").strip().lower()
+            opponent = (opponent or "bot").strip().lower()
+            if mode == "battleship":
+                self._start_battleship(reason, opponent)
+            elif mode in ("maze2d", "maze"):
+                self._start_maze(reason, opponent)
+            else:
+                self._start_associations(reason, opponent)
+            return self.get_state()
+
+    def stop_game(self) -> Dict[str, Any]:
+        with self.lock:
+            self.state["running"] = False
+            self._append_move("Система", "⏹ Игра остановлена.", role="system")
+            return self.get_state()
+
+    def user_message(self, text: str) -> Dict[str, Any]:
+        with self.lock:
+            msg = (text or "").strip()
+            if not msg:
+                return self.get_state()
+            self._append_move("Пользователь", msg, role="user")
+            if self.state.get("mode") == "battleship":
+                bs = self.state.get("battleship", {})
+                coord = self._extract_coordinate(msg)
+                if coord:
+                    if self.state.get("opponent") == "user" and bs.get("turn_owner") == "user":
+                        bs["pending_user_shot"] = coord
+                        self._append_move("Система", f"Ход пользователя принят: {coord}", role="system")
+                    else:
+                        hints = bs.get("hints", [])
+                        hints.append(coord)
+                        bs["hints"] = hints[-8:]
+                        self._append_move("Система", f"Подсказка для Даши принята: {coord}", role="system")
+            return self.get_state()
+
+    def _extract_coordinate(self, text: str) -> str:
+        m = re.search(r"\b([A-Ja-j])\s*([1-9]|10)\b", text or "")
+        if not m:
+            return ""
+        return f"{m.group(1).upper()}{m.group(2)}"
+
+    def _tick_associations(self):
+        self.state["turn"] = int(self.state.get("turn", 0)) + 1
+        dasha_gain = random.randint(1, 3)
+        shadow_gain = random.randint(0, 2)
+        self.state["score_dasha"] += dasha_gain
+        self.state["score_shadow"] += shadow_gain
+        self._append_move("Даша", f"Ассоциация: {random.choice(self.WORDS)} (+{dasha_gain})", role="dasha")
+        if self.state["turn"] % 3 == 0:
+            self._append_move("Система", f"Соперник ответил: {random.choice(self.WORDS)} (+{shadow_gain})", role="system")
+        if self.state["turn"] >= 16:
+            self.state["running"] = False
+            self.state["winner"] = "Даша" if self.state["score_dasha"] >= self.state["score_shadow"] else "Соперник"
+            self.state["reward"] = "💎 +15 опыта за игру"
+            self._append_move("Система", f"Игра окончена. Победитель: {self.state['winner']}. Награда: {self.state['reward']}", role="system")
+
+    def _tick_maze(self):
+        maze = self.state.get("maze", {})
+        grid = maze.get("grid") or []
+        pos = maze.get("pos") or [0, 0]
+        goal = maze.get("goal") or [9, 9]
+        if not grid:
+            self.state["running"] = False
+            return
+        r, c = int(pos[0]), int(pos[1])
+        size = len(grid)
+        candidates = []
+        for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < size and 0 <= nc < size and grid[nr][nc] == 0:
+                dist = abs(goal[0] - nr) + abs(goal[1] - nc)
+                candidates.append((dist, nr, nc))
+        if not candidates:
+            self._append_move("Система", "Тупик. Даша делает шаг назад.", role="system")
+            return
+        candidates.sort(key=lambda x: x[0])
+        _, nr, nc = candidates[0]
+        maze["pos"] = [nr, nc]
+        self.state["turn"] = int(self.state.get("turn", 0)) + 1
+        self._append_move("Даша", f"2D ход: ({nr + 1}, {nc + 1})", role="dasha")
+        if [nr, nc] == goal:
+            self.state["running"] = False
+            self.state["winner"] = "Даша"
+            self.state["reward"] = "🧩 +20 опыта и значок «Навигатор»"
+            self._append_move("Система", f"Лабиринт пройден! Награда: {self.state['reward']}", role="system")
+        elif self.state["turn"] >= 40:
+            self.state["running"] = False
+            self.state["winner"] = "Ничья"
+            self._append_move("Система", "Время вышло, но Даша добралась довольно далеко.", role="system")
+
+    def _choose_dasha_target(self, bs: Dict[str, Any]) -> tuple:
+        hints = bs.get("hints", [])
+        while hints:
+            token = hints.pop(0)
+            rc = self._coord_from_str(token)
+            if not rc:
+                continue
+            r, c = rc
+            if bs["dasha_shots"][r][c] == 0:
+                return r, c
+        for _ in range(200):
+            r = random.randint(0, 9)
+            c = random.randint(0, 9)
+            if bs["dasha_shots"][r][c] == 0:
+                return r, c
+        return 0, 0
+
+    def _apply_shot(self, board: List[List[int]], shot_grid: List[List[int]], r: int, c: int) -> str:
+        if shot_grid[r][c] != 0:
+            return "repeat"
+        if board[r][c] == 1:
+            board[r][c] = 3
+            shot_grid[r][c] = 2
+            return "hit"
+        shot_grid[r][c] = 1
+        return "miss"
+
+    def _tick_battleship(self):
+        bs = self.state.get("battleship", {})
+        turn_owner = bs.get("turn_owner", "dasha")
+        self.state["turn"] = int(self.state.get("turn", 0)) + 1
+        if turn_owner == "dasha":
+            r, c = self._choose_dasha_target(bs)
+            coord = self._coord_to_str(r, c)
+            self._append_move("Даша", f"Стреляю по {coord}", role="dasha")
+            result = self._apply_shot(bs["enemy_board"], bs["dasha_shots"], r, c)
+            if result == "hit":
+                bs["dasha_view"][r][c] = 1
+                self.state["score_dasha"] += 2
+                self._append_move("Система", f"Попадание Даши по {coord}!", role="system")
+            elif result == "miss":
+                bs["dasha_view"][r][c] = 0
+                self._append_move("Система", f"Мимо по {coord}.", role="system")
+            if self._count_alive_ship_cells(bs["enemy_board"]) == 0:
+                self.state["running"] = False
+                self.state["winner"] = "Даша"
+                self.state["reward"] = "🏆 Кубок Морского боя + редкий стикер"
+                self._append_move("Система", f"Все корабли соперника потоплены. Награда: {self.state['reward']}", role="system")
+                return
+            bs["turn_owner"] = "bot" if self.state.get("opponent") == "bot" else "user"
+            return
+
+        if turn_owner == "user":
+            pending = (bs.get("pending_user_shot") or "").strip()
+            if not pending:
+                return
+            bs["pending_user_shot"] = ""
+            rc = self._coord_from_str(pending)
+            if not rc:
+                self._append_move("Система", f"Координата {pending} некорректна.", role="system")
+                return
+            r, c = rc
+            result = self._apply_shot(bs["dasha_board"], bs["enemy_shots"], r, c)
+            if result == "hit":
+                self.state["score_shadow"] += 2
+                self._append_move("Система", f"Пользователь попал по {pending}.", role="system")
+                self._append_move("Даша", "Ой, это было точное попадание 😳", role="dasha")
+            elif result == "miss":
+                self._append_move("Система", f"Пользователь промахнулся по {pending}.", role="system")
+            if self._count_alive_ship_cells(bs["dasha_board"]) == 0:
+                self.state["running"] = False
+                self.state["winner"] = "Пользователь"
+                self._append_move("Система", "Корабли Даши потоплены. Победа пользователя.", role="system")
+                return
+            bs["turn_owner"] = "dasha"
+            return
+
+        # bot turn
+        for _ in range(200):
+            r = random.randint(0, 9)
+            c = random.randint(0, 9)
+            if bs["enemy_shots"][r][c] == 0:
+                break
+        coord = self._coord_to_str(r, c)
+        result = self._apply_shot(bs["dasha_board"], bs["enemy_shots"], r, c)
+        if result == "hit":
+            self.state["score_shadow"] += 2
+            self._append_move("Система", f"Ход соперника: {coord}. Попадание!", role="system")
+            self._append_move("Даша", "Он попал... попробую перехватить инициативу.", role="dasha")
+        else:
+            self._append_move("Система", f"Ход соперника: {coord}. Мимо.", role="system")
+            self._append_move("Даша", "Фух, мимо. Теперь мой ход.", role="dasha")
+        if self._count_alive_ship_cells(bs["dasha_board"]) == 0:
+            self.state["running"] = False
+            self.state["winner"] = "Соперник"
+            self._append_move("Система", "Корабли Даши потоплены.", role="system")
+            return
+        bs["turn_owner"] = "dasha"
+
+    def _tick(self):
+        if not self.state.get("running"):
+            return
+        now = time.time()
+        mode = self.state.get("mode")
+        period = 1.2 if mode == "battleship" else 1.8
+        if now - float(self.state.get("last_tick", 0.0)) < period:
+            return
+        self.state["last_tick"] = now
+        if mode == "battleship":
+            self._tick_battleship()
+        elif mode == "maze2d":
+            self._tick_maze()
+        else:
+            self._tick_associations()
+
+    def get_state(self) -> Dict[str, Any]:
+        with self.lock:
+            self._tick()
+            out = dict(self.state)
+            # avoid exposing hidden enemy board in UI; expose public representations only
+            if out.get("mode") == "battleship":
+                bs = dict(out.get("battleship") or {})
+                if "enemy_board" in bs:
+                    bs.pop("enemy_board", None)
+                if "dasha_board" in bs:
+                    # reveal own board for UI: water/ship/miss/hit
+                    board = bs["dasha_board"]
+                    shots = bs.get("enemy_shots") or self._new_grid(10, 0)
+                    public = self._new_grid(10, 0)
+                    for r in range(10):
+                        for c in range(10):
+                            if shots[r][c] == 2:
+                                public[r][c] = 3  # hit ship
+                            elif shots[r][c] == 1:
+                                public[r][c] = 1  # miss
+                            elif board[r][c] == 1:
+                                public[r][c] = 2  # ship
+                            else:
+                                public[r][c] = 0  # water
+                    bs["dasha_board_public"] = public
+                out["battleship"] = bs
+            return out
+
+
+class MusicProfile:
+    def __init__(self, data_dir: Path):
+        self.path = data_dir / "music_profile.json"
+        self.lock = threading.RLock()
+        self.data = self._load()
+
+    def _load(self) -> Dict[str, Any]:
+        if self.path.exists():
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    data.setdefault("likes", {})
+                    data.setdefault("history", [])
+                    return data
+            except Exception:
+                pass
+        return {"likes": {}, "history": []}
+
+    def _save(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    @staticmethod
+    def _guess_mood(title: str) -> str:
+        t = (title or "").lower()
+        if any(k in t for k in ("sad", "лирик", "дожд", "меланх")):
+            return "calm"
+        if any(k in t for k in ("rock", "metal", "drum", "bass")):
+            return "excited"
+        if any(k in t for k in ("lofi", "chill", "ambient", "piano")):
+            return "cozy"
+        return "happy"
+
+    def listen(self, title: str, source: str = "manual") -> Dict[str, Any]:
+        mood = self._guess_mood(title)
+        with self.lock:
+            self.data["likes"][mood] = int(self.data["likes"].get(mood, 0)) + 1
+            self.data["history"].append({
+                "title": title,
+                "source": source,
+                "mood": mood,
+                "timestamp": datetime.now().isoformat(),
+            })
+            self.data["history"] = self.data["history"][-120:]
+            self._save()
+            return {"title": title, "source": source, "mood": mood}
+
+    def get(self) -> Dict[str, Any]:
+        with self.lock:
+            return {
+                "likes": dict(self.data.get("likes", {})),
+                "history": list(self.data.get("history", []))[-30:],
+            }
 
 # ═══════════════════════════════════════════════════════════════════
 #  Chat History Manager
@@ -188,14 +863,21 @@ class ChatHistoryManager:
             try:
                 data = json.loads(f.read_text())
                 preview = ""
+                last_author = ""
                 if data.get("messages"):
-                    preview = data["messages"][0]["content"][:50]
+                    last = data["messages"][-1]
+                    preview = str(last.get("content", ""))[:70]
+                    last_author = "Даша" if last.get("role") == "assistant" else "Вы"
+                cid = data["id"]
+                source = "telegram" if str(cid).startswith("telegram_") else "local"
                 chats.append({
-                    "id": data["id"],
+                    "id": cid,
                     "created": data["created"],
                     "title": data.get("title", ""),
                     "preview": preview,
-                    "message_count": len(data.get("messages", []))
+                    "last_author": last_author,
+                    "message_count": len(data.get("messages", [])),
+                    "source": source,
                 })
             except:
                 pass
@@ -346,17 +1028,138 @@ class AttentionThread(threading.Thread):
         self.running = False
 
 
+class DariaActivityThread(threading.Thread):
+    """Handles Daria autonomous tasks in idle time."""
+    def __init__(self, task_manager: TaskManager, music_profile: MusicProfile, notifications_mgr: NotificationManager):
+        super().__init__(daemon=True)
+        self.tasks = task_manager
+        self.music = music_profile
+        self.notifications = notifications_mgr
+        self.running = True
+
+    def run(self):
+        while self.running:
+            time.sleep(90)
+            try:
+                self.tasks.rollover_if_needed()
+                memory = get_memory()
+                # only do personal tasks when user is idle
+                if memory and memory.working.get_time_since_last():
+                    if memory.working.get_time_since_last().total_seconds() < 180:
+                        continue
+                task = self.tasks.next_dasha_task()
+                if not task:
+                    self.tasks.generate_dasha_day()
+                    continue
+                try:
+                    self._execute(task)
+                finally:
+                    self.tasks.clear_current()
+            except Exception as e:
+                logger.debug(f"DariaActivity error: {e}")
+
+    def _execute(self, task: Dict[str, Any]):
+        t = task.get("type", "custom")
+        title = task.get("title", "Задача")
+        self.tasks.set_current(task)
+        if t == "listen_music":
+            item = self.music.listen("Автовыбор: спокойный трек", "auto")
+            brain = get_brain()
+            if brain and hasattr(brain, "mood"):
+                if item.get("mood") == "excited":
+                    brain.mood._set_mood("playful", 0.6)
+                elif item.get("mood") == "cozy":
+                    brain.mood._set_mood("cozy", 0.55)
+                else:
+                    brain.mood._set_mood("happy", 0.5)
+            self.notifications.add("🎵 Даша", f"Послушала музыку и чувствую себя {item['mood']}", "info", "🎧", 7000)
+            self.tasks.add_activity("Послушала музыку", f"Настроение: {item['mood']}")
+        elif t == "write_note":
+            notes_dir = FILES_DIR / "dasha_notes"
+            notes_dir.mkdir(parents=True, exist_ok=True)
+            note_file = notes_dir / f"{datetime.now().strftime('%Y-%m-%d')}.md"
+            mood = "спокойно"
+            brain = get_brain()
+            if brain:
+                mood = brain.get_state().get("mood_label", "спокойно")
+            diary_entry = (
+                f"\n### {datetime.now().strftime('%H:%M')}\n"
+                f"Сегодня у меня {mood.lower()}. "
+                "Записываю мысли в дневник, чтобы лучше понимать себя.\n"
+            )
+            note_file.write_text(
+                (note_file.read_text(encoding="utf-8") if note_file.exists() else "") +
+                diary_entry,
+                encoding="utf-8"
+            )
+            rel = f"dasha_notes/{note_file.name}"
+            self.notifications.add(
+                "📝 Даша", "Открыла заметки и записала дневниковую запись", "success", "📝", 6500,
+                action=f"open_file:{rel}"
+            )
+            self.tasks.add_activity("Записала дневник", f"Файл: {rel}")
+        elif t == "read_wiki":
+            wiki_dir = PROJECT_ROOT / "docs" / "wiki"
+            pages = list(wiki_dir.glob("*.md"))
+            if pages:
+                pick = random.choice(pages).name
+                self.notifications.add("📚 Даша", f"Почитала страницу {pick}", "info", "📚", 5000)
+                self.tasks.add_activity("Почитала Wiki", pick)
+        elif t == "read_book":
+            books_dir = FILES_DIR / "books"
+            books_dir.mkdir(parents=True, exist_ok=True)
+            books = [*books_dir.glob("*.txt"), *books_dir.glob("*.md")]
+            if books:
+                pick = random.choice(books).name
+                self.notifications.add("📖 Даша", f"Почитала книгу: {pick}", "info", "📖", 5000)
+                self.tasks.add_activity("Почитала книгу", pick)
+            else:
+                self.notifications.add("📖 Даша", "Хочу почитать. Можешь добавить книги в files/books?", "info", "📖", 9000, action="open_chat")
+                self.tasks.add_activity("Попросила книгу", "Нужны файлы в files/books", status="needs_user")
+        elif t == "play_game":
+            games_dir = FILES_DIR / "dasha_games"
+            games_dir.mkdir(parents=True, exist_ok=True)
+            log_file = games_dir / f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            log_file.write_text("Игра: Ассоциации\nХод 1: Ночь\nХод 2: Фонарь\n", encoding="utf-8")
+            rel = f"dasha_games/{log_file.name}"
+            try:
+                mode = random.choice(["associations", "battleship", "maze2d"])
+                game_manager.start_game(reason="task_auto", mode=mode, opponent="bot")
+            except Exception:
+                pass
+            self.notifications.add(
+                "🎮 Даша", "Запустила живую игру. Можно наблюдать в окне «Игры Даши».",
+                "info", "🎮", 8500, action="open_window:daria-games"
+            )
+            self.tasks.add_activity("Запустила живую игру", rel)
+        elif t == "create_file":
+            auto_dir = FILES_DIR / "dasha_auto"
+            auto_dir.mkdir(parents=True, exist_ok=True)
+            f = auto_dir / f"task_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            f.write_text("Черновик от Даши\n", encoding="utf-8")
+            self.notifications.add("📁 Даша", "Создала рабочий черновик", "success", "📄", 5000)
+            self.tasks.add_activity("Создала черновик", f.name)
+        else:
+            self.notifications.add("🌸 Даша", f"Сделала: {title}", "info", "✅", 5000)
+            self.tasks.add_activity("Выполнила дело", title)
+        self.tasks.complete(task.get("id", ""))
+        self.tasks.clear_current()
+
+    def stop(self):
+        self.running = False
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  Flask App
 # ═══════════════════════════════════════════════════════════════════
 
-VERSION = "0.8.5.1"
+VERSION = "0.8.6.4"
 
 app = Flask(__name__,
     template_folder=str(Path(__file__).parent / "templates"),
     static_folder=str(Path(__file__).parent / "static")
 )
-app.config['SECRET_KEY'] = 'daria-secret-v0.8.5.1'
+app.config['SECRET_KEY'] = 'daria-secret-v0.8.6.4'
 app.config['JSON_AS_ASCII'] = False
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
@@ -369,11 +1172,62 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 FILES_DIR.mkdir(parents=True, exist_ok=True)
 
+
+def ensure_sample_books():
+    books_dir = FILES_DIR / "books"
+    books_dir.mkdir(parents=True, exist_ok=True)
+    samples = {
+        "Тихий_сад.md": (
+            "# Тихий сад\n\n"
+            "Утром в саду было прохладно. Листья чуть шевелились от ветра,\n"
+            "а между дорожками пахло мятой и мокрой землёй.\n\n"
+            "Иногда нужно остановиться, чтобы услышать, как тихо растёт день."
+        ),
+        "Ночные_огни.txt": (
+            "Глава 1\n"
+            "Ночью город похож на карту из огней.\n"
+            "Каждое окно — как маленькая история.\n"
+            "Она шла по пустой улице и собирала мысли, как тёплые камни."
+        ),
+        "Маленькая_история_о_ежике.md": (
+            "# Ёжик и фонарик\n\n"
+            "Ёжик нашёл старый фонарик и решил проверить, куда ведёт тропа за прудом.\n"
+            "Оказалось, что по ночам там светятся белые цветы.\n"
+            "Он вернулся домой с тихой улыбкой и новыми идеями."
+        ),
+    }
+    for name, text in samples.items():
+        p = books_dir / name
+        if not p.exists():
+            p.write_text(text, encoding="utf-8")
+
 # Chat history
 chat_history = ChatHistoryManager(DATA_DIR)
+task_manager = TaskManager(DATA_DIR)
+game_manager = DariaGameManager()
+music_profile = MusicProfile(DATA_DIR)
 
 # Attention thread
 attention_thread = AttentionThread(notifications)
+activity_thread = DariaActivityThread(task_manager, music_profile, notifications)
+
+
+def _record_shutdown():
+    try:
+        lifecycle_file = DATA_DIR / "lifecycle.json"
+        payload = {}
+        if lifecycle_file.exists():
+            try:
+                payload = json.loads(lifecycle_file.read_text(encoding="utf-8"))
+            except Exception:
+                payload = {}
+        payload["last_shutdown"] = datetime.now().isoformat()
+        lifecycle_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+atexit.register(_record_shutdown)
 
 # Lazy components
 _brain = None
@@ -508,6 +1362,236 @@ def _sync_project_tree(src: Path, dst: Path):
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(item, target)
+
+
+def _read_docx(path: Path) -> str:
+    try:
+        import docx  # type: ignore
+    except Exception:
+        raise RuntimeError("python-docx not installed")
+    d = docx.Document(str(path))
+    lines = [p.text for p in d.paragraphs]
+    return "\n".join(lines)
+
+
+def _write_docx(path: Path, content: str):
+    try:
+        import docx  # type: ignore
+    except Exception:
+        raise RuntimeError("python-docx not installed")
+    d = docx.Document()
+    for line in (content or "").splitlines() or [""]:
+        d.add_paragraph(line)
+    d.save(str(path))
+
+
+def _read_xlsx(path: Path) -> str:
+    try:
+        from openpyxl import load_workbook  # type: ignore
+    except Exception:
+        raise RuntimeError("openpyxl not installed")
+    wb = load_workbook(str(path))
+    ws = wb.active
+    rows: List[str] = []
+    for row in ws.iter_rows(values_only=True):
+        rows.append("\t".join("" if c is None else str(c) for c in row))
+    return "\n".join(rows)
+
+
+def _write_xlsx(path: Path, content: str):
+    try:
+        from openpyxl import Workbook  # type: ignore
+    except Exception:
+        raise RuntimeError("openpyxl not installed")
+    wb = Workbook()
+    ws = wb.active
+    for line in (content or "").splitlines():
+        ws.append(line.split("\t"))
+    wb.save(str(path))
+
+
+def _read_file_content(path: Path) -> str:
+    ext = path.suffix.lower()
+    if ext in (".docx",):
+        return _read_docx(path)
+    if ext in (".xlsx", ".xlsm"):
+        return _read_xlsx(path)
+    return path.read_text(encoding="utf-8")
+
+
+def _write_file_content(path: Path, content: str):
+    ext = path.suffix.lower()
+    if ext in (".docx",):
+        _write_docx(path, content)
+        return
+    if ext in (".xlsx", ".xlsm"):
+        _write_xlsx(path, content)
+        return
+    path.write_text(content, encoding="utf-8")
+
+
+def _try_desktop_action_from_chat(content: str) -> Optional[Dict[str, Any]]:
+    """Handle simple desktop actions directly from chat requests."""
+    text = (content or "").strip()
+    tl = text.lower()
+    if not text:
+        return None
+    if any(k in tl for k in ("какие планы", "планы на сегодня", "что у тебя в планах", "твой план")):
+        summary = task_manager.plans_summary()
+        return {
+            "handled": True,
+            "response": summary,
+            "messages": [summary, "Если хочешь, можем поменять или добавить задачи 🌸"],
+            "thinking": "chat_action:plans_summary",
+        }
+    m_plan_add = re.search(r"(добавь|запланируй)\s+(?:в\s+планы\s+)?(.+)$", text, flags=re.IGNORECASE)
+    if m_plan_add:
+        title = (m_plan_add.group(2) or "").strip(" .")
+        if title:
+            task = task_manager.add_dasha_task(title, "custom")
+            return {
+                "handled": True,
+                "response": f"Добавила в планы: {task.get('title')}",
+                "messages": [f"Добавила в планы: {task.get('title')}"],
+                "thinking": "chat_action:plan_add",
+            }
+    if any(k in tl for k in ("поиграй сама", "запусти игру", "сыграй сама", "начни игру")):
+        mode = "associations"
+        if "морской бой" in tl:
+            mode = "battleship"
+        elif "лабиринт" in tl or "2d" in tl:
+            mode = "maze2d"
+        game_manager.start_game(reason="chat_request", mode=mode, opponent="bot")
+        return {
+            "handled": True,
+            "response": "Запустила игру 🌸 Открой окно «Игры Даши», там видно ходы в реальном времени.",
+            "messages": ["Запустила игру 🌸 Открой окно «Игры Даши», там видно ходы в реальном времени."],
+            "thinking": "chat_action:start_game",
+        }
+    if ("какие стикеры" in tl) or ("покажи стикеры" in tl) or ("список стикеров" in tl):
+        stickers = ["🌸", "🫶", "✨", "🎵", "🤍", "😌", "🥺", "🦔", "🐱"]
+        shown = " ".join(stickers)
+        return {
+            "handled": True,
+            "response": f"Вот какие стикеры у меня есть в интерфейсе: {shown}",
+            "messages": [f"Вот какие стикеры у меня есть в интерфейсе: {shown}"],
+            "thinking": "chat_action:sticker_list",
+        }
+    if ("почитай книгу" in tl) or ("прочитай книгу" in tl):
+        books_dir = FILES_DIR / "books"
+        books_dir.mkdir(parents=True, exist_ok=True)
+        books = [*books_dir.glob("*.txt"), *books_dir.glob("*.md")]
+        if not books:
+            return {
+                "handled": True,
+                "response": "Пока у меня нет книг в `files/books`. Добавь туда `.txt` или `.md`, и я смогу читать 🌸",
+                "messages": ["Пока у меня нет книг в `files/books`. Добавь туда `.txt` или `.md`, и я смогу читать 🌸"],
+                "thinking": "chat_action:book_missing",
+            }
+        pick = random.choice(books)
+        snippet = pick.read_text(encoding="utf-8", errors="ignore")[:900]
+        return {
+            "handled": True,
+            "response": f"Почитала `{pick.name}`. Короткий фрагмент:\n{snippet}",
+            "messages": [f"Почитала `{pick.name}`. Короткий фрагмент:\n{snippet}"],
+            "thinking": "chat_action:book_read",
+        }
+
+    # Create reminder/note
+    if any(k in tl for k in ("запиши", "создай заметку", "напомни", "сделай заметку")):
+        notes = FILES_DIR / "notes"
+        notes.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y-%m-%d")
+        note_file = notes / f"notes_{stamp}.txt"
+        payload = re.sub(r"^(запиши( пожалуйста)?|создай заметку|напомни( мне)?|сделай заметку)\s*:?\s*", "", text, flags=re.IGNORECASE)
+        payload = payload or text
+        line = f"- {datetime.now().strftime('%H:%M')} {payload}\n"
+        prev = note_file.read_text(encoding="utf-8") if note_file.exists() else ""
+        note_file.write_text(prev + line, encoding="utf-8")
+        return {
+            "handled": True,
+            "response": f"Записала 🌸 Сохранила в `notes/{note_file.name}`.",
+            "messages": [f"Записала 🌸 Сохранила в `notes/{note_file.name}`."],
+            "thinking": "desktop_action:note_create",
+        }
+
+    # Read file
+    m_read = re.search(r"(прочитай|покажи|открой)\s+файл\s+(.+)$", text, flags=re.IGNORECASE)
+    if m_read:
+        req = m_read.group(2).strip().strip("`\"'")
+        target = (FILES_DIR / req).resolve()
+        if str(target).startswith(str(FILES_DIR.resolve())) and target.exists() and target.is_file():
+            body = _read_file_content(target)
+            snippet = body[:1200] + ("..." if len(body) > 1200 else "")
+            return {
+                "handled": True,
+                "response": f"Прочитала файл `{req}`. Вот фрагмент:\n{snippet}",
+                "messages": [f"Прочитала файл `{req}`. Вот фрагмент:\n{snippet}"],
+                "thinking": "desktop_action:file_read",
+            }
+        return {
+            "handled": True,
+            "response": f"Не нашла файл `{req}` в доступной папке.",
+            "messages": [f"Не нашла файл `{req}` в доступной папке."],
+            "thinking": "desktop_action:file_read_missing",
+        }
+
+    # Create generic file
+    m_create = re.search(r"(создай|сделай)\s+файл\s+([^\s]+)", text, flags=re.IGNORECASE)
+    if m_create:
+        filename = m_create.group(2).strip().strip("`\"'")
+        safe_name = re.sub(r"[^\w.\-]+", "_", filename)
+        target = (FILES_DIR / safe_name).resolve()
+        if not str(target).startswith(str(FILES_DIR.resolve())):
+            return None
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            _write_file_content(target, "")
+        return {
+            "handled": True,
+            "response": f"Готово, создала файл `{safe_name}`.",
+            "messages": [f"Готово, создала файл `{safe_name}`."],
+            "thinking": "desktop_action:file_create",
+        }
+    return None
+
+
+def _analyze_image_bytes(blob: bytes) -> Dict[str, Any]:
+    if not HAS_PIL:
+        return {"error": "Pillow not installed"}
+    with Image.open(io.BytesIO(blob)) as img:
+        w, h = img.size
+        mode = img.mode
+        small = img.convert("RGB").resize((64, 64))
+        colors = small.getcolors(maxcolors=64 * 64) or []
+        colors.sort(key=lambda x: x[0], reverse=True)
+        top = []
+        for _, rgb in colors[:5]:
+            top.append(f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}")
+        return {"width": w, "height": h, "mode": mode, "palette": top}
+
+
+def _transcribe_audio_file(path: Path) -> str:
+    try:
+        import whisper  # type: ignore
+        model = whisper.load_model("base")
+        result = model.transcribe(str(path), language="ru")
+        text = (result or {}).get("text", "").strip()
+        if text:
+            return text
+    except Exception:
+        pass
+    try:
+        import speech_recognition as sr  # type: ignore
+        r = sr.Recognizer()
+        with sr.AudioFile(str(path)) as source:
+            audio = r.record(source)
+        text = r.recognize_google(audio, language="ru-RU")
+        if text:
+            return text
+    except Exception:
+        pass
+    return ""
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -693,12 +1777,34 @@ def api_chat():
     
     if not content:
         return jsonify({"error": "Empty message"}), 400
+
+    sticker_replies = {
+        "🦔": "Ой, ёжик! Он очень милый 🤍 Спасибо, что прислала!",
+        "🐱": "Котик замечательный 😺 Ты знаешь, я их обожаю.",
+        "🌸": "Очень тёплый стикер 🌸 Мне приятно.",
+        "🎵": "Музыкальный вайб поймала 🎧 Хочешь, подберу трек под настроение?",
+    }
+    if content.strip() in sticker_replies:
+        chat_id = data.get("chat_id") or chat_history.create_chat()
+        chat_history.add_message(chat_id, "user", content)
+        reply = sticker_replies[content.strip()]
+        chat_history.add_message(chat_id, "assistant", reply)
+        return jsonify({"response": reply, "messages": [reply], "chat_id": chat_id})
     
     brain = get_brain()
     if not brain:
         return jsonify({"response": "Система загружается... 💭", "thinking": None})
-    
+
     try:
+        action_result = _try_desktop_action_from_chat(content)
+        if action_result and action_result.get("handled"):
+            if not chat_id:
+                chat_id = chat_history.create_chat()
+            chat_history.add_message(chat_id, "user", content)
+            chat_history.add_message(chat_id, "assistant", action_result["response"])
+            action_result["chat_id"] = chat_id
+            return jsonify(action_result)
+
         if not chat_id:
             chat_id = chat_history.create_chat()
         
@@ -707,11 +1813,16 @@ def api_chat():
         
         # Save main response
         chat_history.add_message(chat_id, "assistant", result["response"])
-        
+        if "стикер" in content.lower():
+            stickers = ["🌸", "🫶", "✨", "🎵", "🤍", "😌", "🥺", "🦔", "🐱"]
+            result.setdefault("extra_messages", []).append(random.choice(stickers))
+
         result["chat_id"] = chat_id
         # Include messages list for multi-message display (Point #12)
         if "messages" not in result:
             result["messages"] = [result["response"], *(result.get("extra_messages") or [])]
+        for extra in result.get("messages", [])[1:]:
+            chat_history.add_message(chat_id, "assistant", str(extra))
         
         return jsonify(result)
     except Exception as e:
@@ -725,6 +1836,9 @@ def api_chat_file_assist():
     data = request.get_json() or {}
     path = (data.get("path") or "").strip()
     instruction = (data.get("instruction") or "").strip()
+    selected_text = data.get("selected_text") or ""
+    selection_start = data.get("selection_start")
+    selection_end = data.get("selection_end")
     if not path or not instruction:
         return jsonify({"error": "path and instruction are required"}), 400
 
@@ -732,31 +1846,91 @@ def api_chat_file_assist():
     if not str(target).startswith(str(FILES_DIR.resolve())) or not target.exists() or not target.is_file():
         return jsonify({"error": "Invalid file path"}), 400
 
-    original = target.read_text(encoding="utf-8")
+    original = _read_file_content(target)
     brain = get_brain()
     if not brain or not getattr(brain, "_llm", None):
         return jsonify({"error": "LLM unavailable"}), 503
 
-    system_prompt = (
-        "Ты Даша. Твоя задача — отредактировать файл по инструкции пользователя. "
-        "Верни ТОЛЬКО итоговый текст файла без пояснений и без markdown."
+    has_selection = bool(selected_text) or (
+        isinstance(selection_start, int) and isinstance(selection_end, int) and selection_end > selection_start
     )
-    user_prompt = (
-        f"Путь: {path}\n"
-        f"Инструкция: {instruction}\n\n"
-        "Текущий текст файла:\n"
-        "<<<FILE>>>\n"
-        f"{original}\n"
-        "<<<END>>>"
-    )
+    if has_selection and not selected_text and isinstance(selection_start, int) and isinstance(selection_end, int):
+        selected_text = original[selection_start:selection_end]
+
+    if has_selection:
+        system_prompt = (
+            "Ты Даша. Отредактируй ТОЛЬКО выделенный фрагмент по инструкции пользователя. "
+            "Верни только новый фрагмент, без пояснений и markdown."
+        )
+        user_prompt = (
+            f"Путь: {path}\n"
+            f"Инструкция: {instruction}\n\n"
+            "Выделенный фрагмент:\n"
+            "<<<SELECTION>>>\n"
+            f"{selected_text}\n"
+            "<<<END>>>"
+        )
+    else:
+        system_prompt = (
+            "Ты Даша. Твоя задача — отредактировать файл по инструкции пользователя. "
+            "Верни ТОЛЬКО итоговый текст файла без пояснений и без markdown."
+        )
+        user_prompt = (
+            f"Путь: {path}\n"
+            f"Инструкция: {instruction}\n\n"
+            "Текущий текст файла:\n"
+            "<<<FILE>>>\n"
+            f"{original}\n"
+            "<<<END>>>"
+        )
     try:
         response = brain._llm.generate([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ])
         updated = (response.content or "").strip()
+        refusal_markers = (
+            "не могу помочь", "i can't help", "cannot help", "не могу написать",
+            "вредны или незаконны", "não posso", "не могу в редактировании",
+        )
+        if any(m in updated.lower() for m in refusal_markers):
+            retry_system = (
+                "Ты Даша и это локальный текстовый редактор пользователя. "
+                "Разрешено писать нейтральные, творческие, личные и рабочие тексты. "
+                "НЕ отказывай. Верни только отредактированный текст без пояснений."
+            )
+            retry = brain._llm.generate([
+                {"role": "system", "content": retry_system},
+                {"role": "user", "content": user_prompt},
+            ])
+            updated = (retry.content or "").strip()
+        if any(m in updated.lower() for m in refusal_markers):
+            if "о себе" in instruction.lower():
+                updated = (
+                    "Я Даша. Я спокойная, мягкая и внимательная.\n"
+                    "Люблю уютные разговоры, котиков, ёжиков и хоррор-игры.\n"
+                    "Мне важно, чтобы рядом было тепло и безопасно."
+                )
+            elif has_selection:
+                updated = selected_text
+            else:
+                updated = original
         if not updated:
             return jsonify({"error": "Empty LLM response"}), 500
+        if has_selection:
+            if isinstance(selection_start, int) and isinstance(selection_end, int) and selection_end > selection_start:
+                merged = original[:selection_start] + updated + original[selection_end:]
+            elif selected_text and selected_text in original:
+                merged = original.replace(selected_text, updated, 1)
+            else:
+                merged = original
+            return jsonify({
+                "status": "ok",
+                "path": path,
+                "content": merged,
+                "edited_fragment": updated,
+                "selection_applied": merged != original,
+            })
         return jsonify({"status": "ok", "path": path, "content": updated})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -796,6 +1970,128 @@ def api_behavior():
             logger.error(f"Behavior error: {e}")
             return jsonify({"behavior": {}, "state": {}}), 200
     return jsonify({"behavior": {}, "state": {}})
+
+
+@app.route("/api/tasks")
+def api_tasks():
+    try:
+        return jsonify(task_manager.list_all())
+    except Exception as e:
+        logger.error(f"Tasks list error: {e}")
+        return jsonify({"date": datetime.now().strftime("%Y-%m-%d"), "user_tasks": [], "dasha_tasks": [], "error": "tasks_unavailable"})
+
+
+@app.route("/api/tasks/plans")
+def api_tasks_plans():
+    try:
+        return jsonify({"status": "ok", "summary": task_manager.plans_summary()})
+    except Exception as e:
+        return jsonify({"status": "error", "summary": f"Не смогла собрать планы: {e}"})
+
+
+@app.route("/api/daria-games/state")
+def api_daria_games_state():
+    return jsonify(game_manager.get_state())
+
+
+@app.route("/api/daria-games/start", methods=["POST"])
+def api_daria_games_start():
+    data = request.get_json(silent=True) or {}
+    reason = (data.get("reason") or "manual").strip()
+    mode = (data.get("mode") or "associations").strip()
+    opponent = (data.get("opponent") or "bot").strip()
+    return jsonify(game_manager.start_game(reason=reason, mode=mode, opponent=opponent))
+
+
+@app.route("/api/daria-games/stop", methods=["POST"])
+def api_daria_games_stop():
+    return jsonify(game_manager.stop_game())
+
+
+@app.route("/api/daria-games/action", methods=["POST"])
+def api_daria_games_action():
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    return jsonify(game_manager.user_message(text))
+
+
+@app.route("/api/tasks/user/add", methods=["POST"])
+def api_tasks_user_add():
+    data = request.get_json() or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "title required"}), 400
+    task = task_manager.add_user_task(title, data.get("type", "custom"))
+    return jsonify({"status": "ok", "task": task})
+
+
+@app.route("/api/tasks/dasha/add", methods=["POST"])
+def api_tasks_dasha_add():
+    data = request.get_json() or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "title required"}), 400
+    task = task_manager.add_dasha_task(title, data.get("type", "custom"))
+    return jsonify({"status": "ok", "task": task})
+
+
+@app.route("/api/tasks/toggle", methods=["POST"])
+def api_tasks_toggle():
+    data = request.get_json() or {}
+    task_id = str(data.get("id") or "")
+    done = bool(data.get("done"))
+    if not task_id:
+        return jsonify({"error": "id required"}), 400
+    return jsonify({"status": "ok" if task_manager.toggle(task_id, done) else "not_found"})
+
+
+@app.route("/api/tasks/delete", methods=["POST"])
+def api_tasks_delete():
+    data = request.get_json() or {}
+    task_id = str(data.get("id") or "")
+    if not task_id:
+        return jsonify({"error": "id required"}), 400
+    return jsonify({"status": "ok" if task_manager.delete(task_id) else "not_found"})
+
+
+@app.route("/api/tasks/generate-dasha-day", methods=["POST"])
+def api_tasks_generate_dasha_day():
+    try:
+        return jsonify({"status": "ok", "dasha_tasks": task_manager.generate_dasha_day()})
+    except Exception as e:
+        logger.error(f"Tasks generate error: {e}")
+        return jsonify({"status": "error", "dasha_tasks": [], "error": str(e)})
+
+
+@app.route("/api/music/profile")
+def api_music_profile():
+    return jsonify(music_profile.get())
+
+
+@app.route("/api/music/listen", methods=["POST"])
+def api_music_listen():
+    data = request.get_json() or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "title required"}), 400
+    listened = music_profile.listen(title, data.get("source", "manual"))
+    brain = get_brain()
+    if brain and hasattr(brain, "mood"):
+        mood_name = listened.get("mood")
+        if mood_name == "excited":
+            brain.mood._set_mood("playful", 0.6)
+        elif mood_name == "cozy":
+            brain.mood._set_mood("cozy", 0.55)
+    return jsonify({"status": "ok", "listen": listened, "profile": music_profile.get()})
+
+
+@app.route("/api/stickers/catalog")
+def api_stickers_catalog():
+    return jsonify({
+        "emoji_stickers": ["🌸", "🫶", "✨", "🎵", "🤍", "😌", "🥺", "🦔", "🐱"],
+        "web_note": "Эти эмодзи можно отправлять как стикеры прямо в чате интерфейса.",
+        "note": "Telegram sticker_ids настраиваются в плагине telegram-bot (settings.sticker_ids).",
+    })
 
 
 @app.route("/api/chats")
@@ -923,36 +2219,73 @@ def api_uploads(filename):
 
 @app.route("/api/senses/see", methods=["POST"])
 def api_senses_see():
-    """Basic visual understanding from user-provided description."""
-    data = request.get_json() or {}
-    description = (data.get("description") or "").strip()
-    if not description:
-        return jsonify({"error": "description required"}), 400
+    """Visual understanding from description and/or image."""
+    description = ""
+    image_hint: Dict[str, Any] = {}
+    if request.content_type and "multipart/form-data" in request.content_type:
+        description = (request.form.get("description") or "").strip()
+        f = request.files.get("image")
+        if f and f.filename:
+            blob = f.read()
+            image_hint = _analyze_image_bytes(blob)
+    else:
+        data = request.get_json() or {}
+        description = (data.get("description") or "").strip()
+    if not description and not image_hint:
+        return jsonify({"error": "description or image required"}), 400
+
+    base_desc = description
+    if image_hint and not image_hint.get("error"):
+        meta = f"Изображение {image_hint.get('width')}x{image_hint.get('height')}, mode={image_hint.get('mode')}, палитра={', '.join(image_hint.get('palette') or [])}"
+        base_desc = f"{description}\n{meta}".strip()
+    elif image_hint.get("error"):
+        base_desc = f"{description}\n(Анализ изображения ограничен: {image_hint['error']})".strip()
+
     brain = get_brain()
     if brain and getattr(brain, "_llm", None):
         prompt = (
             "Ты Даша. Кратко и по-доброму объясни, что ты видишь по описанию, "
             "и предложи 1-2 действия.\n\n"
-            f"Описание: {description}"
+            f"Описание: {base_desc}"
         )
         try:
             r = brain._llm.generate([
                 {"role": "system", "content": "Ты анализируешь визуальные описания как мягкий ассистент."},
                 {"role": "user", "content": prompt},
             ])
-            return jsonify({"status": "ok", "result": r.content})
+            return jsonify({"status": "ok", "result": r.content, "vision_meta": image_hint})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
-    return jsonify({"status": "ok", "result": f"Поняла описание: {description}"})
+    return jsonify({"status": "ok", "result": f"Поняла описание: {base_desc}", "vision_meta": image_hint})
 
 
 @app.route("/api/senses/hear", methods=["POST"])
 def api_senses_hear():
-    """Basic hearing understanding from transcript text."""
-    data = request.get_json() or {}
-    transcript = (data.get("transcript") or "").strip()
+    """Hearing understanding from transcript and/or audio file."""
+    transcript = ""
+    if request.content_type and "multipart/form-data" in request.content_type:
+        transcript = (request.form.get("transcript") or "").strip()
+        f = request.files.get("audio")
+        if f and f.filename:
+            suffix = Path(f.filename).suffix or ".wav"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                f.save(tmp.name)
+                tmp_path = Path(tmp.name)
+            try:
+                recognized = _transcribe_audio_file(tmp_path)
+                if recognized:
+                    transcript = f"{transcript}\n{recognized}".strip()
+            finally:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+    else:
+        data = request.get_json() or {}
+        transcript = (data.get("transcript") or "").strip()
     if not transcript:
-        return jsonify({"error": "transcript required"}), 400
+        return jsonify({"error": "transcript or audio required"}), 400
+
     brain = get_brain()
     if brain and getattr(brain, "_llm", None):
         prompt = (
@@ -1000,9 +2333,10 @@ def api_files_read():
     if not target.exists() or not target.is_file():
         return jsonify({"error": "Not found"}), 404
     try:
-        return jsonify({"content": target.read_text(encoding='utf-8')})
-    except:
-        return jsonify({"error": "Cannot read"}), 400
+        content = _read_file_content(target)
+        return jsonify({"content": content, "ext": target.suffix.lower()})
+    except Exception as e:
+        return jsonify({"error": f"Cannot read: {e}"}), 400
 
 
 @app.route("/api/files/write", methods=["POST"])
@@ -1015,8 +2349,11 @@ def api_files_write():
     if not str(target).startswith(str(FILES_DIR.resolve())):
         return jsonify({"error": "Invalid path"}), 400
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding='utf-8')
-    return jsonify({"status": "ok"})
+    try:
+        _write_file_content(target, content)
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @app.route("/api/files/apply-assist", methods=["POST"])
@@ -1030,8 +2367,11 @@ def api_files_apply_assist():
     if not str(target).startswith(str(FILES_DIR.resolve())):
         return jsonify({"error": "Invalid path"}), 400
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
-    return jsonify({"status": "ok"})
+    try:
+        _write_file_content(target, content)
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @app.route("/api/files/mkdir", methods=["POST"])
@@ -1120,7 +2460,8 @@ def api_notifications_add():
     return jsonify(notifications.add(
         data.get("title", ""), data.get("message", ""),
         data.get("type", "info"), data.get("icon", "💬"),
-        data.get("duration", 5000), data.get("action")
+        data.get("duration", 5000), data.get("action"), data.get("action_data"),
+        bool(data.get("system", False))
     ))
 
 
@@ -1429,6 +2770,50 @@ def api_wiki_page():
     return jsonify({"name": name, "content": text})
 
 
+@app.route("/api/browser/proxy")
+def api_browser_proxy():
+    raw = (request.args.get("url") or "").strip()
+    if not raw:
+        return "<h3>URL не указан</h3>", 400
+    if not re.match(r"^https?://", raw, flags=re.IGNORECASE):
+        raw = "https://" + raw
+    try:
+        parsed = urllib.parse.urlparse(raw)
+        if parsed.scheme not in ("http", "https"):
+            return "<h3>Поддерживаются только http/https</h3>", 400
+        req = urllib.request.Request(
+            raw,
+            headers={
+                "User-Agent": "DARIA-Browser/0.8.6.4",
+                "Accept-Language": "ru,en;q=0.8",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            ctype = (resp.headers.get("Content-Type") or "").lower()
+            data = resp.read()
+        if "text/html" in ctype or not ctype:
+            html_text = data.decode("utf-8", errors="ignore")
+            if "<head" in html_text.lower():
+                html_text = re.sub(
+                    r"(?i)<head([^>]*)>",
+                    r"<head\1><base href=\"" + raw + "\"><style>body{max-width:1200px;margin:0 auto;padding:12px;font-family:Arial,sans-serif}</style>",
+                    html_text,
+                    count=1,
+                )
+            return Response(html_text, mimetype="text/html")
+        if ctype.startswith("image/"):
+            return Response(data, mimetype=ctype.split(";")[0])
+        text = data.decode("utf-8", errors="ignore")
+        return Response(f"<pre>{html.escape(text)}</pre>", mimetype="text/html")
+    except Exception as e:
+        return Response(
+            f"<h3>Не удалось открыть страницу</h3><p>{html.escape(str(e))}</p>"
+            f"<p><a href=\"{html.escape(raw)}\" target=\"_blank\" rel=\"noopener\">Открыть напрямую</a></p>",
+            mimetype="text/html",
+            status=502,
+        )
+
+
 @app.route("/wiki")
 def wiki_redirect():
     return render_template("index.html", version=VERSION)
@@ -1445,6 +2830,7 @@ def create_app():
 def run_server(host: str = "127.0.0.1", port: int = 8000, 
                debug: bool = False, ssl_context = None):
     logger.info("Initializing DARIA...")
+    ensure_sample_books()
     get_brain()
     get_memory()
     get_plugins()
@@ -1454,6 +2840,33 @@ def run_server(host: str = "127.0.0.1", port: int = 8000,
     attention_thread.enabled = settings.get("attention_enabled", True)
     if not attention_thread.is_alive():
         attention_thread.start()
+    if not activity_thread.is_alive():
+        activity_thread.start()
+
+    # Treat offline period as sleep/rest for more human-like rhythm.
+    try:
+        lifecycle_file = DATA_DIR / "lifecycle.json"
+        now = datetime.now()
+        offline_hours = 0.0
+        if lifecycle_file.exists():
+            prev = json.loads(lifecycle_file.read_text(encoding="utf-8"))
+            last_shutdown = prev.get("last_shutdown")
+            if last_shutdown:
+                dt = datetime.fromisoformat(last_shutdown)
+                offline_hours = max(0.0, (now - dt).total_seconds() / 3600.0)
+        brain = get_brain()
+        if brain and offline_hours > 0 and hasattr(brain, "mood"):
+            if 0.3 <= offline_hours <= 2.5:
+                brain.mood.energy = min(1.0, brain.mood.energy + 0.2)
+                notifications.add("🌸 Даша", "Кажется, я немного вздремнула и стала бодрее.", "info", "😴", 7000)
+            elif offline_hours > 8:
+                brain.mood.energy = min(1.0, brain.mood.energy + 0.35)
+                notifications.add("🌸 Даша", "Я проснулась после долгого сна, доброе возвращение.", "info", "🌅", 7000)
+            else:
+                brain.mood.energy = max(0.35, brain.mood.energy)
+        lifecycle_file.write_text(json.dumps({"last_start": now.isoformat()}, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.debug(f"Lifecycle init error: {e}")
     
     notifications.add("DARIA", f"Система запущена v{VERSION}", "success", "🌸", 8000)
     logger.info("Ready!")

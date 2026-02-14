@@ -41,10 +41,12 @@
         <div class="start-items">
             <div class="start-item" onclick="openWindow('chat');toggleStartMenu()"><span>💬</span>Чат</div>
             <div class="start-item" onclick="openWindow('self');toggleStartMenu()"><span>🪞</span>Самоосознание</div>
+            <div class="start-item" onclick="openWindow('todos');toggleStartMenu()"><span>✅</span>Списки дел</div>
             <div class="start-item" onclick="openWindow('senses');toggleStartMenu()"><span>👁️</span>Сенсоры</div>
             <div class="start-item" onclick="openWindow('wiki');toggleStartMenu()"><span>📚</span>Wiki</div>
             <div class="start-item" onclick="openWindow('updater');toggleStartMenu()"><span>⬆️</span>Обновления</div>
             <div class="start-item" onclick="openWindow('files');toggleStartMenu()"><span>📁</span>Файлы</div>
+            <div class="start-item" onclick="openWindow('daria-games');toggleStartMenu()"><span>🎮</span>Игры Даши</div>
             <div class="start-item" onclick="openWindow('terminal');toggleStartMenu()"><span>💻</span>Терминал</div>
             <div class="start-item" onclick="openWindow('store');toggleStartMenu()"><span>🛒</span>Магазин</div>
             <div class="start-item" onclick="openWindow('settings');toggleStartMenu()"><span>⚙️</span>Настройки</div>
@@ -94,6 +96,8 @@
                 <div class="chat-messages" id="chat-messages"></div>
                 <div class="chat-typing hidden" id="chat-typing">Дарья печатает<span class="dots">...</span></div>
                 <div class="chat-input-area">
+                    <button class="chat-sticker-toggle" title="Стикеры" onclick="toggleStickerPicker(event)">🩷</button>
+                    <div id="chat-sticker-picker" class="chat-sticker-picker hidden"></div>
                     <input type="text" id="chat-input" placeholder="Напиши сообщение..." onkeypress="if(event.key==='Enter')sendChatMessage()">
                     <button onclick="sendChatMessage()">➤</button>
                 </div>
@@ -105,6 +109,7 @@
         <div class="files-container">
             <div class="files-toolbar">
                 <span id="files-path">/</span>
+                <button onclick="goParentDirectory()">⬅️</button>
                 <button onclick="loadFiles(state.currentPath)">🔄</button>
                 <button onclick="createNewFile()">📄</button>
                 <button onclick="createNewFolder()">📁</button>
@@ -118,10 +123,48 @@
                     <button onclick="closeEditor()">✖</button>
                 </div>
                 <div class="editor-header">
-                    <input type="text" id="file-assist-prompt" placeholder="Попроси Дашу: исправь ошибки / перепиши стиль / сделай кратко...">
-                    <button id="file-assist-apply-btn" onclick="assistFileWithDaria()">🌸 Применить</button>
+                    <span id="file-editor-kind" class="editor-kind">Формат: text</span>
                 </div>
-                <textarea id="file-editor-content"></textarea>
+                <div class="editor-body">
+                    <textarea id="file-editor-content"></textarea>
+                    <button class="file-assist-toggle" title="Редактировать с Дашей" onclick="toggleFileAssistPanel()">
+                        <img src="/static/img/logo.png" alt="Dasha">
+                    </button>
+                    <div id="file-assist-panel" class="file-assist-panel hidden">
+                        <div class="file-assist-head">
+                            <b>🌸 Редактирование с Дашей</b>
+                            <button onclick="toggleFileAssistPanel()">✖</button>
+                        </div>
+                        <div id="file-assist-log" class="file-assist-log"></div>
+                        <div class="file-assist-input">
+                            <input type="text" id="file-assist-prompt" placeholder="Что изменить в выделенном фрагменте или всём файле?">
+                            <button id="file-assist-apply-btn" onclick="assistFileWithDaria()">Применить</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="todos-content">
+        <div class="settings-container">
+            <div class="settings-section">
+                <h3>✅ Дела от пользователя</h3>
+                <div class="setting-row">
+                    <input id="todo-user-input" type="text" placeholder="Например: послушай новый трек и напиши впечатление">
+                    <button onclick="addUserTask()">Добавить</button>
+                </div>
+                <div id="todo-user-list" class="todo-list"></div>
+            </div>
+            <div class="settings-section">
+                <h3>🌸 Дела Даши</h3>
+                <div class="setting-row">
+                    <button onclick="generateDashaTasks()">Сформировать день</button>
+                    <button onclick="askDashaPlans()">Обсудить планы</button>
+                    <span id="todo-date">—</span>
+                </div>
+                <div id="todo-plan-summary" class="small-note">Сейчас: загрузка...</div>
+                <div id="todo-dasha-list" class="todo-list"></div>
             </div>
         </div>
     </template>
@@ -138,6 +181,7 @@
                 <h3>👁️ Что Даша видит</h3>
                 <div class="setting-row">
                     <input id="senses-see-input" type="text" placeholder="Опиши картинку или экран...">
+                    <label class="upload-btn small">Изображение<input id="senses-see-file" type="file" accept="image/*" hidden></label>
                     <button onclick="sensesSee()">Анализ</button>
                 </div>
             </div>
@@ -145,6 +189,7 @@
                 <h3>👂 Что Даша слышит</h3>
                 <div class="setting-row">
                     <input id="senses-hear-input" type="text" placeholder="Вставь расшифровку речи/звука...">
+                    <label class="upload-btn small">Аудио<input id="senses-hear-file" type="file" accept="audio/*" hidden></label>
                     <button onclick="sensesHear()">Понять</button>
                 </div>
             </div>
@@ -167,7 +212,7 @@
     <template id="terminal-content">
         <div class="terminal-container">
             <div class="terminal-output" id="terminal-output">
-                <div class="term-line">DARIA Terminal v0.8.5.1</div>
+                <div class="term-line">DARIA Terminal v0.8.6.4</div>
                 <div class="term-line">Введи help для команд</div>
             </div>
             <div class="terminal-input"><span>$</span><input type="text" id="terminal-input" onkeypress="if(event.key==='Enter')executeTerminal()"></div>
@@ -179,10 +224,36 @@
             <div class="browser-toolbar">
                 <button onclick="browserBack()">←</button>
                 <button onclick="browserForward()">→</button>
-                <input type="text" id="browser-url" value="https://google.com" onkeypress="if(event.key==='Enter')browserGo()">
+                    <input type="text" id="browser-url" value="https://example.org" onkeypress="if(event.key==='Enter')browserGo()">
                 <button onclick="browserGo()">→</button>
             </div>
             <iframe id="browser-frame"></iframe>
+        </div>
+    </template>
+
+    <template id="daria-games-content">
+        <div class="daria-games-container">
+            <div class="daria-games-toolbar">
+                <select id="daria-game-mode">
+                    <option value="associations">Ассоциации</option>
+                    <option value="battleship">Морской бой</option>
+                    <option value="maze2d">2D Лабиринт</option>
+                </select>
+                <select id="daria-game-opponent">
+                    <option value="bot">Соперник: Бот</option>
+                    <option value="user">Соперник: Пользователь</option>
+                </select>
+                <button onclick="startDariaGame()">▶ Старт</button>
+                <button onclick="stopDariaGame()">⏹ Стоп</button>
+                <span id="daria-game-score">Счёт: 0 - 0</span>
+            </div>
+            <div class="daria-games-status" id="daria-game-status">Статус: ожидание</div>
+            <div id="daria-game-board" class="daria-game-board"></div>
+            <div class="daria-games-input">
+                <input id="daria-game-input" type="text" placeholder="Подсказка или ход (например: B7)" onkeypress="if(event.key==='Enter')sendDariaGameMessage()">
+                <button onclick="sendDariaGameMessage()">Отправить</button>
+            </div>
+            <div class="daria-games-log" id="daria-game-log"></div>
         </div>
     </template>
 
@@ -199,6 +270,10 @@
                 <button onclick="playerNext()">⏭</button>
             </div>
             <input type="range" class="volume-slider" value="80" onchange="playerVolume(this.value)">
+            <div class="setting-row" style="width:100%;">
+                <input type="text" id="music-title-input" placeholder="Название трека или ссылка (YTM/YouTube)">
+                <button onclick="dashaListenTrack()">Даша слушает</button>
+            </div>
             <label class="upload-btn">🎵 Выбрать<input type="file" accept="audio/*" onchange="playerLoad(this.files)" hidden></label>
             <audio id="player-audio"></audio>
         </div>

@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.8.5.1-pink?style=for-the-badge" alt="Version"/>
+  <img src="https://img.shields.io/badge/version-0.8.6.4-pink?style=for-the-badge" alt="Version"/>
   <img src="https://img.shields.io/badge/python-3.10+-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="License"/>
   <img src="https://img.shields.io/badge/platform-Windows%20|%20Linux%20|%20macOS-lightgrey?style=for-the-badge" alt="Platform"/>
@@ -141,6 +141,7 @@ Wiki: [docs/wiki/Home.md](docs/wiki/Home.md)
 
 ## 📝 Релизы
 
+- Release Notes 0.8.6.4: [docs/wiki/Release-Notes-0.8.6.4.md](docs/wiki/Release-Notes-0.8.6.4.md)
 - Release Notes 0.8.5.1: [docs/wiki/Release-Notes-0.8.5.1.md](docs/wiki/Release-Notes-0.8.5.1.md)
 - Release Notes 0.8.5: [docs/wiki/Release-Notes-0.8.5.md](docs/wiki/Release-Notes-0.8.5.md)
 - Release Notes 0.8.1: [docs/wiki/Release-Notes-0.8.1.md](docs/wiki/Release-Notes-0.8.1.md)

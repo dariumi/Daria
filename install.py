@@ -1,17 +1,47 @@
 #!/usr/bin/env python3
 """
-🌸 DARIA v0.8.5.1 Installation Script
-- Fixed SSL regeneration crash
-- Updated banner & version
-- OS-dependent server setup
+🌸 DARIA Installation Script
+- Installation profiles (base/recommended/full)
+- Optional extras for senses/files/tray/music
+- Autostart configuration
 """
 
-import os, sys, subprocess, platform, shutil, socket
+import os, sys, subprocess, platform, shutil, socket, json
 from pathlib import Path
 
-VERSION = "0.8.5.1"
+def _read_version() -> str:
+    try:
+        return Path("VERSION").read_text(encoding="utf-8").strip()
+    except Exception:
+        return "0.8.5.1"
+
+VERSION = _read_version()
 DEFAULT_PORT = 7777
 LOCAL_DOMAIN = "dasha.local"
+
+INSTALL_PROFILES = {
+    "1": {
+        "id": "base",
+        "label": "Базовая",
+        "desc": "Только ядро DARIA (минимум зависимостей).",
+        "extras": [],
+    },
+    "2": {
+        "id": "recommended",
+        "label": "Рекомендуемая",
+        "desc": "Ядро + визуальные/офисные функции + трей.",
+        "extras": ["Pillow>=10.0.0", "pystray>=0.19.5", "python-docx>=1.1.0", "openpyxl>=3.1.2"],
+    },
+    "3": {
+        "id": "full",
+        "label": "Полная",
+        "desc": "Все возможности + speech stack (может ставиться дольше).",
+        "extras": [
+            "Pillow>=10.0.0", "pystray>=0.19.5", "python-docx>=1.1.0", "openpyxl>=3.1.2",
+            "SpeechRecognition>=3.10.0", "pydub>=0.25.1",
+        ],
+    },
+}
 
 class C:
     PINK = '\033[38;5;213m'
@@ -83,6 +113,22 @@ def check_python():
     ok(f"Python {v.major}.{v.minor}.{v.micro}")
     return True
 
+
+def choose_install_profile():
+    step("Тип установки", "🧭")
+    for key, profile in INSTALL_PROFILES.items():
+        print(f"  {C.CYAN}{key}) {profile['label']}{C.END} — {profile['desc']}")
+    try:
+        choice = input(f"\n{C.CYAN}Выбери профиль [2]: {C.END}").strip() or "2"
+    except (EOFError, KeyboardInterrupt):
+        choice = "2"
+    if choice not in INSTALL_PROFILES:
+        warn("Неизвестный выбор, использую 'Рекомендуемая'")
+        choice = "2"
+    p = INSTALL_PROFILES[choice]
+    ok(f"Профиль: {p['label']}")
+    return p
+
 def setup_venv(info):
     step("Виртуальное окружение", "📦")
     venv = info['cwd'] / 'venv'
@@ -94,15 +140,22 @@ def setup_venv(info):
     pip = venv / ('Scripts' if info['is_windows'] else 'bin') / ('pip.exe' if info['is_windows'] else 'pip')
     return pip
 
-def install_deps(pip):
+def install_deps(pip, profile):
     step("Зависимости", "📚")
     subprocess.run([str(pip), 'install', '--upgrade', 'pip', '-q'], check=True)
     ok("pip обновлён")
     if Path('requirements.txt').exists():
         info("Устанавливаю пакеты...")
         subprocess.run([str(pip), 'install', '-r', 'requirements.txt', '-q'], check=True)
-        ok("Установлены")
-        return True
+        ok("Базовые зависимости установлены")
+    extras = profile.get("extras", [])
+    if extras:
+        info(f"Устанавливаю дополнительные пакеты ({profile['id']})...")
+        try:
+            subprocess.run([str(pip), 'install', *extras, '-q'], check=True)
+            ok("Дополнительные зависимости установлены")
+        except subprocess.CalledProcessError as e:
+            warn(f"Часть дополнительных зависимостей не установилась: {e}")
     return False
 
 def setup_dirs(info):
@@ -213,6 +266,66 @@ def install_plugins(daria_dir):
     if count == 0:
         info("Нет плагинов для установки")
 
+def _autostart_path(nfo):
+    home = nfo["home"]
+    if nfo["is_windows"]:
+        appdata = Path(os.environ.get("APPDATA", home))
+        return appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / "DARIA.bat"
+    if nfo["is_macos"]:
+        return home / "Library" / "LaunchAgents" / "com.daria.app.plist"
+    return home / ".config" / "autostart" / "daria.desktop"
+
+
+def configure_autostart(nfo, use_tray=False):
+    step("Автозапуск", "🟢")
+    try:
+        ans = input(f"  {C.CYAN}Включить автозапуск DARIA? [y/N]: {C.END}").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        ans = "n"
+
+    target = _autostart_path(nfo)
+    if ans != "y":
+        if target.exists():
+            target.unlink()
+            ok("Старый автозапуск удалён")
+        else:
+            info("Автозапуск выключен")
+        return False
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    project = nfo["cwd"]
+    py = sys.executable
+    tray_arg = "--tray " if use_tray else ""
+
+    if nfo["is_windows"]:
+        target.write_text(
+            f"@echo off\ncd /d \"{project}\"\n\"{py}\" \"{project / 'main.py'}\" {tray_arg}--port {DEFAULT_PORT}\n",
+            encoding="utf-8",
+        )
+    elif nfo["is_macos"]:
+        plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.daria.app</string>
+  <key>ProgramArguments</key>
+  <array><string>{py}</string><string>{project / 'main.py'}</string>{'<string>--tray</string>' if use_tray else ''}<string>--port</string><string>{DEFAULT_PORT}</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>WorkingDirectory</key><string>{project}</string>
+</dict></plist>"""
+        target.write_text(plist, encoding="utf-8")
+    else:
+        target.write_text(
+            "[Desktop Entry]\n"
+            "Type=Application\n"
+            "Name=DARIA\n"
+            f"Exec={py} {project / 'main.py'} {tray_arg}--port {DEFAULT_PORT}\n"
+            "X-GNOME-Autostart-enabled=true\n",
+            encoding="utf-8",
+        )
+    ok(f"Автозапуск включён: {target}")
+    return True
+
+
 def create_scripts(info, daria_dir):
     step("Скрипты запуска", "🚀")
     cert, key = daria_dir / 'ssl' / 'cert.pem', daria_dir / 'ssl' / 'key.pem'
@@ -222,6 +335,10 @@ def create_scripts(info, daria_dir):
             f'@echo off\ncall venv\\Scripts\\activate\npython main.py --port {DEFAULT_PORT} %*\n',
             encoding='utf-8')
         ok("start.bat")
+        Path('start-tray.bat').write_text(
+            f'@echo off\ncall venv\\Scripts\\activate\npython main.py --tray --port {DEFAULT_PORT} %*\n',
+            encoding='utf-8')
+        ok("start-tray.bat")
         if cert.exists():
             Path('start-https.bat').write_text(
                 f'@echo off\ncall venv\\Scripts\\activate\n'
@@ -233,6 +350,10 @@ def create_scripts(info, daria_dir):
         s.write_text(f'#!/bin/bash\nsource venv/bin/activate\npython main.py --port {DEFAULT_PORT} "$@"\n')
         s.chmod(0o755)
         ok("start.sh")
+        t = Path('start-tray.sh')
+        t.write_text(f'#!/bin/bash\nsource venv/bin/activate\npython main.py --tray --port {DEFAULT_PORT} "$@"\n')
+        t.chmod(0o755)
+        ok("start-tray.sh")
         if cert.exists():
             h = Path('start-https.sh')
             h.write_text(
@@ -241,10 +362,22 @@ def create_scripts(info, daria_dir):
             h.chmod(0o755)
             ok("start-https.sh")
 
-def print_final(info, daria_dir):
+def save_install_config(daria_dir, profile_id: str, autostart: bool, tray_default: bool):
+    cfg = {
+        "profile": profile_id,
+        "autostart": autostart,
+        "tray_default": tray_default,
+        "version": VERSION,
+        "installed_at": str(Path().cwd()),
+    }
+    (daria_dir / "install_config.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def print_final(info, daria_dir, profile_id: str, autostart_enabled: bool, tray_default: bool):
     ssl_ok = (daria_dir / 'ssl' / 'cert.pem').exists()
     ip = get_ip()
     cmd = "start.bat" if info['is_windows'] else "./start.sh"
+    tray_cmd = "start-tray.bat" if info['is_windows'] else "./start-tray.sh"
     hcmd = "start-https.bat" if info['is_windows'] else "./start-https.sh"
 
     print(f"""
@@ -253,7 +386,8 @@ def print_final(info, daria_dir):
   │      ♥  Установка DARIA v{VERSION} завершена!  ♥           │
   ├────────────────────────────────────────────────────────┤
   │                                                        │
-  │  {C.GREEN}Запуск:{C.PINK}  {C.CYAN}{cmd:<46}{C.PINK}│""")
+  │  {C.GREEN}Запуск:{C.PINK}  {C.CYAN}{cmd:<46}{C.PINK}│
+  │  {C.GREEN}Трей:{C.PINK}    {C.CYAN}{tray_cmd:<46}{C.PINK}│""")
 
     if ssl_ok:
         print(f"""  │  {C.GREEN}HTTPS:{C.PINK}   {C.CYAN}{hcmd:<46}{C.PINK}│
@@ -263,6 +397,10 @@ def print_final(info, daria_dir):
   │    {C.CYAN}https://{ip}:{DEFAULT_PORT}{C.PINK}                             │""")
 
     print(f"""  │                                                        │
+  │  {C.YELLOW}Профиль:{C.PINK} {profile_id:<38}│
+  │  {C.YELLOW}Автозапуск:{C.PINK} {"включён" if autostart_enabled else "выключен":<35}│
+  │  {C.YELLOW}Трей по умолчанию:{C.PINK} {"да" if tray_default else "нет":<28}│
+  │                                                        │
   ├────────────────────────────────────────────────────────┤
   │  {C.YELLOW}Ollama:{C.PINK}  ollama serve                                │
   │  {C.YELLOW}Модель:{C.PINK}  ollama pull llama3.1:8b-instruct-q4_K_M     │
@@ -277,8 +415,9 @@ def main():
 
     if not check_python(): sys.exit(1)
 
+    profile = choose_install_profile()
     pip = setup_venv(nfo)
-    install_deps(pip)
+    install_deps(pip, profile)
     daria_dir = setup_dirs(nfo)
 
     try:
@@ -289,10 +428,18 @@ def main():
     if ssl_answer != 'n':
         setup_ssl(nfo, daria_dir)
 
+    try:
+        tray_ans = input(f"\n{C.CYAN}🪟 Использовать трей по умолчанию в скриптах? [Y/n]: {C.END}").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        tray_ans = 'y'
+    tray_default = tray_ans != 'n'
+
     check_ollama()
     install_plugins(daria_dir)
     create_scripts(nfo, daria_dir)
-    print_final(nfo, daria_dir)
+    autostart_enabled = configure_autostart(nfo, use_tray=tray_default)
+    save_install_config(daria_dir, profile["id"], autostart_enabled, tray_default)
+    print_final(nfo, daria_dir, profile["id"], autostart_enabled, tray_default)
 
 if __name__ == '__main__':
     try:

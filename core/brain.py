@@ -318,7 +318,12 @@ class ProactiveSystem:
             return random.choice([["Добрый вечер 🌆", "Как прошёл твой день?"], ["Если хочешь,", "можем поболтать вечером 😊"]])
         if context_hint:
             return [f"Кстати, про «{context_hint[:30]}...»", "Продолжим эту тему? 💬"]
-        return random.choice([["Я рядом 👋", "Если хочешь, давай продолжим чат 💕"], ["Хочу тебя услышать 🌸", "Как ты сейчас?"]])
+        return random.choice([
+            ["Я рядом 👋", "Если хочешь, давай продолжим чат 💕"],
+            ["Хочу тебя услышать 🌸", "Как ты сейчас?"],
+            ["Небольшая просьба 💭", "Если сможешь, поделись со мной любимой песней или фильмом?"],
+            ["Мне очень интересно", "Можешь посоветовать мне книгу на вечер? 📖"],
+        ])
 
 
 MALE_NAMES = {'александр', 'алексей', 'андрей', 'антон', 'артём', 'дмитрий',
@@ -397,6 +402,7 @@ class DariaBrain:
 • Разнообразь начала фраз
 • Эмодзи 1-2 на сообщение
 • ПОМНИ весь диалог — не противоречь себе
+• Если пользователь явно сменила тему, не возвращайся к прошлой теме без просьбы
 • Не пиши "доброе утро" вне утра, "добрый вечер" вне вечера
 • Если упоминаешь время в будущем, оно ДОЛЖНО быть позже текущего времени минимум на 20 минут
 • Если назначила время, мягко вернись к теме около этого времени (без таймера в тексте)
@@ -427,6 +433,14 @@ class DariaBrain:
         "early_morning": ["Утречко! ☀️ Рано ты!", "Доброе утро! 🌅"],
         "morning": ["Доброе утро! ☀️", "Привет! Хорошего утра! 🌸"],
         "default": ["Привет! 💕", "Хей! 🌸", "Приветик! ✨"],
+    }
+    TOPIC_STOPWORDS = {
+        "это", "эта", "этот", "эти", "того", "тому", "том", "там", "тут", "здесь",
+        "просто", "ладно", "хорошо", "ок", "окей", "да", "нет", "ага", "ну", "мм",
+        "как", "что", "когда", "где", "почему", "зачем", "кто", "какой", "какая",
+        "про", "об", "обо", "для", "или", "а", "и", "но", "же", "ли", "бы",
+        "меня", "тебя", "тебе", "мне", "него", "неё", "нас", "вас",
+        "привет", "пока", "спасибо",
     }
 
     def __init__(self):
@@ -563,12 +577,18 @@ class DariaBrain:
         return self._generate_fallback(thinking.emotion, text)
 
     def _generate_llm_response(self, user_message, thinking, needs_greeting):
+        self_intro = self._natural_self_intro_reply(user_message)
+        if self_intro:
+            return self_intro
+        direct_status = self._natural_status_reply(user_message)
+        if direct_status:
+            return direct_status
         time = TimeAwareness.get_time_of_day()
         season = TimeAwareness.get_season()
         now = datetime.now()
         time_info = f"{time['ru']}, {now.strftime('%H:%M')}, {season['ru']} {season['emoji']}"
         mood_state = self.mood.get_state()
-        mood_info = f"{mood_state['mood_label']} ({mood_state['mood']}, интенсивность: {mood_state['mood_intensity']})"
+        mood_info = f"{mood_state['mood_label']} ({mood_state['mood']})"
         time_context = ""
         if time["name"] in ["night", "late_evening"]: time_context = "Сейчас ночь — отвечай мягко"
         elif time["name"] == "early_morning": time_context = "Раннее утро — немного сонная"
@@ -581,6 +601,7 @@ class DariaBrain:
         greeting_context = "ВАЖНО: Давно не общались. Начни с приветствия!" if needs_greeting else ""
 
         user_context = ""; memory_context = ""; conversation_summary = ""
+        topic_shift = self._is_topic_shift(user_message)
         if self._memory:
             profile = self._memory.get_user_profile()
             name = profile.get("user_name", "")
@@ -592,7 +613,10 @@ class DariaBrain:
             tc = self._memory.get_time_context()
             if tc.get("comment"): memory_context = f"ПОМНИ: {tc['comment']}"
             summary = self._memory.working.get_conversation_summary()
-            if summary: conversation_summary = f"Недавний разговор:\n{summary}"
+            if summary and not topic_shift:
+                conversation_summary = f"Недавний разговор:\n{summary}"
+            elif topic_shift:
+                conversation_summary = "Пользователь переключилась на новую тему. Фокусируйся на текущем сообщении."
 
         training_context = self._get_training_context()
         style_hints = self.style_learner.get_style_hints()
@@ -603,11 +627,13 @@ class DariaBrain:
             user_context=user_context, memory_context=memory_context,
             training_context=training_context, style_hints=style_hints,
             conversation_summary=conversation_summary)
+        if topic_shift:
+            system_prompt += "\n\nВАЖНО: Сейчас новая тема, не продолжай старую тему без прямой просьбы."
         system_prompt = f"{system_prompt}\n\nБАЗОВАЯ САМООПИСАНИЕ ДАШИ:\n{self.get_self_instruction()}"
 
         messages = [{"role": "system", "content": system_prompt}]
         if self._memory:
-            messages.extend(self._memory.get_context_for_llm(limit=15))
+            messages.extend(self._memory.get_context_for_llm(limit=5 if topic_shift else 15))
 
         multi = ""
         if random.random() < 0.25 and length != "short":
@@ -621,6 +647,35 @@ class DariaBrain:
             if len(parts) > 1: return parts[:3]
         return cleaned
 
+    def _extract_topic_keywords(self, text: str) -> set:
+        words = re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9]{3,}", (text or "").lower())
+        return {w for w in words if w not in self.TOPIC_STOPWORDS}
+
+    def _is_topic_shift(self, user_message: str) -> bool:
+        if not self._memory or not self._memory.working.turns:
+            return False
+
+        msg = (user_message or "").strip().lower()
+        explicit = any(p in msg for p in (
+            "другая тема", "сменим тему", "не об этом", "не про это",
+            "забудь это", "проехали", "хватит об этом", "новая тема",
+        ))
+        if explicit:
+            return True
+
+        current = self._extract_topic_keywords(user_message)
+        if len(current) < 2:
+            return False
+
+        recent_turns = self._memory.working.turns[-4:]
+        recent_text = " ".join(f"{t.user_message} {t.assistant_response}" for t in recent_turns)
+        recent = self._extract_topic_keywords(recent_text)
+        if not recent:
+            return False
+
+        overlap = len(current & recent)
+        return (overlap / max(1, len(current))) < 0.2
+
     def _get_training_context(self) -> str:
         try:
             from .plugins import get_plugin_manager
@@ -631,6 +686,12 @@ class DariaBrain:
         return ""
 
     def _generate_fallback(self, emotion: str, user_message: str = "") -> str:
+        self_intro = self._natural_self_intro_reply(user_message)
+        if self_intro:
+            return self_intro
+        direct_status = self._natural_status_reply(user_message)
+        if direct_status:
+            return direct_status
         time = TimeAwareness.get_time_of_day()
         mood = self.mood.mood
         user_name = ""
@@ -726,6 +787,35 @@ class DariaBrain:
             result = re.sub(r'(?i)\bдобрый вечер\b[!,.]?\s*', '', result).strip()
         result = re.sub(r'(?i)"[^"]*(сорок [^"]* часть|принц петруши)[^"]*"', '', result).strip()
         return result.strip()
+
+    def _natural_status_reply(self, user_message: str) -> Optional[str]:
+        tl = (user_message or "").lower().strip()
+        if not tl:
+            return None
+        if not any(p in tl for p in ("как дела", "как ты", "как настроение", "как самочувствие")):
+            return None
+        mood = self.mood.get_state().get("mood", "calm")
+        variants = {
+            "happy": ["У меня всё хорошо, настроение тёплое 😊 А у тебя как?", "Хорошо, я в хорошем настроении 🌸 Как ты?"],
+            "playful": ["У меня всё неплохо и немного игриво 😌 А у тебя как?", "Хорошо, сегодня я бодрая и живая ✨ Как ты?"],
+            "sleepy": ["Я чуть сонная, но всё в порядке 😴 Как ты?", "Немного клонит в сон, но я рядом 🌙 А ты как?"],
+            "sad": ["Сейчас немного тихая, но держусь 🌸 Как ты себя чувствуешь?", "Чуть грущу, но всё нормально. Как у тебя дела?"],
+            "calm": ["У меня всё спокойно и хорошо 😌 А у тебя как дела?", "Нормально, спокойное состояние 🌸 Как ты?"],
+        }
+        pool = variants.get(mood, variants["calm"])
+        return random.choice(pool)
+
+    def _natural_self_intro_reply(self, user_message: str) -> Optional[str]:
+        tl = (user_message or "").lower().strip()
+        if not tl:
+            return None
+        if not any(p in tl for p in ("расскажи о себе", "кто ты", "какая ты", "опиши себя")):
+            return None
+        return (
+            "Я Даша. Спокойная, мягкая и немного застенчивая 🌸\n"
+            "Люблю тёплый диалог, котиков, ёжиков и хоррор-игры.\n"
+            "Стараюсь быть рядом бережно и по-настоящему."
+        )
 
     def generate_attention_message(self) -> Optional[str]:
         return self.attention.generate_message(self.mood.mood)

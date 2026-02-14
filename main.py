@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🌸 DARIA v0.8.5.1 - AI Desktop Companion
+🌸 DARIA v0.8.6.4 - AI Desktop Companion
 """
 
 import sys
@@ -10,7 +10,11 @@ import logging
 import threading
 import platform
 import time
+import webbrowser
+import json
+import subprocess
 from pathlib import Path
+from typing import Optional
 
 # Disable Flask logs
 import warnings
@@ -25,9 +29,11 @@ def get_version() -> str:
     version_file = Path(__file__).parent / 'VERSION'
     if version_file.exists():
         return version_file.read_text().strip()
-    return '0.8.5.1'
+    return '0.8.6.4'
 
 VERSION = get_version()
+TRAY_LOG_FILE = Path.home() / ".daria" / "tray.log"
+TRAY_ICON_PNG = Path.home() / ".daria" / "cache" / "tray-favicon.png"
 
 # ═══════════════════════════════════════════════════════════════════
 #  Colors
@@ -426,6 +432,156 @@ def run_server(host: str, port: int, debug: bool, ssl_context):
     from web.app import run_server as start_flask
     start_flask(host=host, port=port, debug=debug, ssl_context=ssl_context)
 
+
+def _autostart_path() -> Path:
+    home = Path.home()
+    if sys.platform.startswith("linux"):
+        return home / ".config" / "autostart" / "daria.desktop"
+    if sys.platform == "win32":
+        appdata = Path(os.environ.get("APPDATA", home))
+        return appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / "DARIA.bat"
+    return home / ".daria" / "autostart.unsupported"
+
+
+def set_autostart(enabled: bool, host: str = "127.0.0.1", port: int = 7777):
+    p = _autostart_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if not enabled:
+        if p.exists():
+            p.unlink()
+        return
+    project = Path(__file__).resolve().parent
+    if sys.platform.startswith("linux"):
+        p.write_text(
+            "[Desktop Entry]\n"
+            "Type=Application\n"
+            "Name=DARIA\n"
+            f"Exec={sys.executable} {project / 'main.py'} --host {host} --port {port} --tray\n"
+            "X-GNOME-Autostart-enabled=true\n",
+            encoding="utf-8",
+        )
+        return
+    if sys.platform == "win32":
+        p.write_text(
+            f"@echo off\n\"{sys.executable}\" \"{project / 'main.py'}\" --host {host} --port {port} --tray\n",
+            encoding="utf-8",
+        )
+
+
+def run_tray(host: str, port: int, debug: bool, ssl_context):
+    if sys.platform.startswith("linux"):
+        os.environ.setdefault("PYSTRAY_BACKEND", "appindicator")
+    try:
+        import pystray
+        from PIL import Image, ImageDraw
+    except Exception:
+        # Fallback to normal mode if tray deps unavailable
+        run_server(host, port, debug, ssl_context)
+        return
+
+    from web.app import run_server as start_flask
+    server_thread = threading.Thread(
+        target=start_flask,
+        kwargs={"host": host, "port": port, "debug": debug, "ssl_context": ssl_context},
+        daemon=True
+    )
+    server_thread.start()
+
+    def ensure_tray_icon_png() -> Optional[Path]:
+        project = Path(__file__).resolve().parent
+        svg = project / "web" / "static" / "favicon.svg"
+        if not svg.exists():
+            return None
+        try:
+            TRAY_ICON_PNG.parent.mkdir(parents=True, exist_ok=True)
+            # 1) python converter, if available
+            try:
+                import cairosvg  # type: ignore
+                cairosvg.svg2png(url=str(svg), write_to=str(TRAY_ICON_PNG), output_width=64, output_height=64)
+                if TRAY_ICON_PNG.exists():
+                    return TRAY_ICON_PNG
+            except Exception:
+                pass
+            # 2) system converters
+            for cmd in (
+                ["rsvg-convert", "-w", "64", "-h", "64", str(svg), "-o", str(TRAY_ICON_PNG)],
+                ["inkscape", str(svg), "--export-type=png", "--export-filename", str(TRAY_ICON_PNG), "-w", "64", "-h", "64"],
+            ):
+                try:
+                    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    if TRAY_ICON_PNG.exists():
+                        return TRAY_ICON_PNG
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return None
+
+    def make_icon():
+        project = Path(__file__).resolve().parent
+        icon_candidates = []
+        tray_png = ensure_tray_icon_png()
+        if tray_png:
+            icon_candidates.append(tray_png)
+        icon_candidates.extend([
+            project / "web" / "static" / "img" / "logo.png",
+            project / "web" / "static" / "favicon.png",
+        ])
+        for p in icon_candidates:
+            if p.exists():
+                try:
+                    return Image.open(p).convert("RGBA").resize((64, 64))
+                except Exception:
+                    pass
+        img = Image.new("RGBA", (64, 64), (255, 105, 180, 255))
+        d = ImageDraw.Draw(img)
+        d.ellipse((8, 8, 56, 56), fill=(255, 20, 147, 255))
+        d.text((20, 20), "D", fill=(255, 255, 255, 255))
+        return img
+
+    def open_ui(_icon=None, _item=None):
+        proto = "https" if ssl_context else "http"
+        webbrowser.open(f"{proto}://localhost:{port}")
+
+    def open_logs_ui(_icon=None, _item=None):
+        proto = "https" if ssl_context else "http"
+        webbrowser.open(f"{proto}://localhost:{port}/?open=logs")
+
+    def open_log_file(_icon=None, _item=None):
+        try:
+            TRAY_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            if not TRAY_LOG_FILE.exists():
+                TRAY_LOG_FILE.write_text("DARIA tray log initialized.\n", encoding="utf-8")
+            if sys.platform.startswith("linux"):
+                subprocess.Popen(["xdg-open", str(TRAY_LOG_FILE)])
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(TRAY_LOG_FILE)])
+            elif sys.platform == "win32":
+                os.startfile(str(TRAY_LOG_FILE))  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+    def toggle_autostart(_icon=None, _item=None):
+        p = _autostart_path()
+        enable = not p.exists()
+        set_autostart(enable, host, port)
+
+    def quit_all(icon, _item=None):
+        try:
+            icon.stop()
+        finally:
+            os._exit(0)
+
+    menu = pystray.Menu(
+        pystray.MenuItem("Открыть DARIA", open_ui, default=True),
+        pystray.MenuItem("Открыть лог-консоль", open_logs_ui),
+        pystray.MenuItem("Открыть лог-файл", open_log_file),
+        pystray.MenuItem("Автозапуск", toggle_autostart),
+        pystray.MenuItem("Выход", quit_all),
+    )
+    icon = pystray.Icon("DARIA", make_icon(), "DARIA", menu)
+    icon.run()
+
 # ═══════════════════════════════════════════════════════════════════
 #  Main
 # ═══════════════════════════════════════════════════════════════════
@@ -445,6 +601,8 @@ def main():
     parser.add_argument('--check', action='store_true', help='Проверка')
     parser.add_argument('--version', action='store_true', help='Версия')
     parser.add_argument('--no-sleep', action='store_true', default=True, help='NoSleep')
+    parser.add_argument('--tray', action='store_true', help='Запуск в системном трее (если доступно)')
+    parser.add_argument('--tray-daemon', action='store_true', help=argparse.SUPPRESS)
 
     args = parser.parse_args()
 
@@ -470,8 +628,46 @@ def main():
                 print(f"{c.RED}SSL сертификаты не найдены!{c.END}")
                 sys.exit(1)
 
+    # If launched from terminal in tray mode, detach into background so tray keeps running
+    # even after terminal window is closed.
+    if args.tray and not args.tray_daemon and os.name != "nt":
+        try:
+            is_tty = sys.stdin.isatty()
+        except Exception:
+            is_tty = False
+        if is_tty:
+            TRAY_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            cmd = [
+                sys.executable, str(Path(__file__).resolve()),
+                "--host", args.host,
+                "--port", str(args.port),
+                "--tray",
+                "--tray-daemon",
+            ]
+            if args.debug:
+                cmd.append("--debug")
+            if args.ssl:
+                cmd.append("--ssl")
+            if args.ssl_cert:
+                cmd.extend(["--ssl-cert", args.ssl_cert])
+            if args.ssl_key:
+                cmd.extend(["--ssl-key", args.ssl_key])
+            with open(TRAY_LOG_FILE, "a", encoding="utf-8") as logf:
+                subprocess.Popen(
+                    cmd,
+                    stdout=logf,
+                    stderr=logf,
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            print(f"{c.GREEN}DARIA запущена в трее. Лог: {TRAY_LOG_FILE}{c.END}")
+            return
+
     try:
-        run_server(args.host, args.port, args.debug, ssl_context)
+        if args.tray:
+            run_tray(args.host, args.port, args.debug, ssl_context)
+        else:
+            run_server(args.host, args.port, args.debug, ssl_context)
     except KeyboardInterrupt:
         no_sleep.stop()
         print(f"\n  {c.PINK}👋 Пока-пока! До встречи! 🌸{c.END}\n")

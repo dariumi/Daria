@@ -58,6 +58,9 @@ class TelegramBotPlugin(DariaPlugin):
         self._group_histories: Dict[str, List[Dict[str, str]]] = {}
         self._chat_meta: Dict[str, Dict[str, Any]] = {}
         self._bot_message_ids: Dict[str, List[int]] = {}
+        self._user_relations: Dict[str, Dict[str, Any]] = {}
+        self._sticker_enabled = True
+        self._sticker_ids: List[str] = []
         self._bot_id: Optional[int] = None
         self._bot_username: str = ""
 
@@ -73,6 +76,9 @@ class TelegramBotPlugin(DariaPlugin):
         self._allowed_groups = self._normalize_int_list(settings.get("allowed_groups", []))
         self._group_histories = self.api.load_data("group_histories", {})
         self._chat_meta = self.api.load_data("chat_meta", {})
+        self._user_relations = self.api.load_data("user_relations", {})
+        self._sticker_enabled = settings.get("sticker_enabled", True)
+        self._sticker_ids = settings.get("sticker_ids", [])
 
         if self.bot_token and self._auto_start:
             self.start_bot()
@@ -95,6 +101,7 @@ class TelegramBotPlugin(DariaPlugin):
             "auto_start": self._auto_start,
             "private_mode": self._private_mode,
             "allowed_groups": self._allowed_groups,
+            "sticker_enabled": self._sticker_enabled,
             "chats": self._get_chats_for_ui(),
         }
 
@@ -110,6 +117,8 @@ class TelegramBotPlugin(DariaPlugin):
             self._auto_start = data.get("auto_start", True)
             self._private_mode = data.get("private_mode", True)
             self._allowed_groups = self._normalize_int_list(data.get("allowed_groups", []))
+            self._sticker_enabled = bool(data.get("sticker_enabled", True))
+            self._sticker_ids = [str(x).strip() for x in (data.get("sticker_ids", []) or []) if str(x).strip()]
             self._save_settings()
             return {"status": "ok", "token_configured": bool(self.bot_token)}
 
@@ -155,9 +164,12 @@ class TelegramBotPlugin(DariaPlugin):
             "group_mode": self._group_mode,
             "private_mode": self._private_mode,
             "allowed_groups": self._allowed_groups,
+            "sticker_enabled": self._sticker_enabled,
+            "sticker_ids": self._sticker_ids,
         })
         self.api.save_data("group_histories", self._group_histories)
         self.api.save_data("chat_meta", self._chat_meta)
+        self.api.save_data("user_relations", self._user_relations)
 
     @staticmethod
     def _normalize_int_list(values: Any) -> List[int]:
@@ -346,6 +358,59 @@ class TelegramBotPlugin(DariaPlugin):
             return True
         return bool(re.search(r"\b(даша|дарья)\b", tl))
 
+    @staticmethod
+    def _is_single_emoji(text: str) -> bool:
+        t = (text or "").strip()
+        if not t or " " in t or len(t) > 4:
+            return False
+        return bool(re.match(r"^[\U0001F300-\U0001FAFF\u2600-\u27BF]+$", t))
+
+    def _update_user_relation(self, chat_id: int, user_id: int, user_name: str, text: str):
+        key = f"{chat_id}:{user_id}"
+        rel = self._user_relations.get(key, {"user_id": user_id, "name": user_name, "affinity": 0})
+        tl = (text or "").lower()
+        if any(w in tl for w in ("спасибо", "класс", "умница", "молодец", "люблю")):
+            rel["affinity"] = min(5, int(rel.get("affinity", 0)) + 1)
+        if any(w in tl for w in ("дура", "туп", "бесишь", "отстань")):
+            rel["affinity"] = max(-5, int(rel.get("affinity", 0)) - 1)
+        rel["name"] = user_name or rel.get("name") or str(user_id)
+        rel["updated"] = datetime.now().isoformat()
+        self._user_relations[key] = rel
+
+    def _get_user_relation_hint(self, chat_id: int, user_id: int) -> str:
+        key = f"{chat_id}:{user_id}"
+        rel = self._user_relations.get(key)
+        if not rel:
+            return "новый участник"
+        a = int(rel.get("affinity", 0))
+        if a >= 3:
+            return "очень тёплое доверие"
+        if a >= 1:
+            return "доброжелательное отношение"
+        if a <= -3:
+            return "напряжённые отношения, отвечай осторожно"
+        if a <= -1:
+            return "слегка насторожённое общение"
+        return "нейтральное отношение"
+
+    async def _send_assistant_message(self, update: Update, text: str):
+        sent = await update.message.reply_text(text)
+        self._remember_bot_message(update.effective_chat.id, getattr(sent, "message_id", None))
+        self._remember_chat_meta(update, "assistant", text)
+        if self._mirror_to_web:
+            self._mirror_message(update.effective_chat.id, "assistant", text)
+
+        if self._sticker_enabled:
+            # Optional sticker when sticker file_ids configured and emotion-like response.
+            if self._sticker_ids and random.random() < 0.18:
+                try:
+                    sticker_id = random.choice(self._sticker_ids)
+                    st = await update.effective_chat.send_sticker(sticker=sticker_id)
+                    self._remember_bot_message(update.effective_chat.id, getattr(st, "message_id", None))
+                    self._remember_chat_meta(update, "assistant", "[sticker]")
+                except Exception:
+                    pass
+
     def _group_allowed(self, chat_id: int) -> bool:
         if not self._allowed_groups:
             return False
@@ -500,6 +565,7 @@ class TelegramBotPlugin(DariaPlugin):
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_type = str(update.effective_chat.type)
         user_id = update.effective_user.id
+        user_name = update.effective_user.full_name if update.effective_user else str(user_id)
         # Whitelist by users is enforced in private chats.
         # For groups we rely on allowed group ids + trigger checks.
         if chat_type == "private" and self.allowed_users and user_id not in self.allowed_users:
@@ -509,6 +575,8 @@ class TelegramBotPlugin(DariaPlugin):
         text = update.message.text
         reply_info = self._reply_info(update)
         self._remember_chat_meta(update, "user", text)
+        if chat_type in ("group", "supergroup"):
+            self._update_user_relation(update.effective_chat.id, user_id, user_name, text)
 
         if chat_type == "private" and not self._private_mode:
             return
@@ -525,7 +593,13 @@ class TelegramBotPlugin(DariaPlugin):
             use_group_mode = self._group_mode and str(update.effective_chat.type) in ("group", "supergroup")
             if use_group_mode:
                 # LLM generation is blocking; move it off the bot event loop.
-                result = await asyncio.to_thread(self._process_group_message, update.effective_chat.id, user_input)
+                result = await asyncio.to_thread(
+                    self._process_group_message,
+                    update.effective_chat.id,
+                    user_id,
+                    user_name,
+                    user_input
+                )
             else:
                 # LLM generation is blocking; move it off the bot event loop.
                 result = await asyncio.to_thread(self.api.send_message, user_input)
@@ -542,27 +616,25 @@ class TelegramBotPlugin(DariaPlugin):
                     # Keep a tiny pause between multi-part messages without
                     # introducing long delivery lag.
                     await asyncio.sleep(0.2)
-                sent = await update.message.reply_text(msg)
-                self._remember_bot_message(update.effective_chat.id, getattr(sent, "message_id", None))
-                self._remember_chat_meta(update, "assistant", msg)
-                if self._mirror_to_web:
-                    self._mirror_message(update.effective_chat.id, "assistant", msg)
+                await self._send_assistant_message(update, msg)
 
         except Exception as e:
             self.api.log(f"Message error: {e}", "error")
             sent = await update.message.reply_text("Извини, у меня сейчас небольшие проблемы... 💭")
             self._remember_bot_message(update.effective_chat.id, getattr(sent, "message_id", None))
 
-    def _process_group_message(self, chat_id: int, text: str) -> Dict[str, Any]:
+    def _process_group_message(self, chat_id: int, user_id: int, user_name: str, text: str) -> Dict[str, Any]:
         key = str(chat_id)
         history = self._group_histories.get(key, [])
         history.append({"role": "user", "content": text})
         history = history[-20:]
+        relation_hint = self._get_user_relation_hint(chat_id, user_id)
         system = {
             "role": "system",
             "content": (
                 "Ты Даша. Это отдельный групповой чат Telegram. "
-                "Отвечай мягко и дружелюбно, но не используй персональную долговременную память."
+                "Отвечай мягко и дружелюбно, но не используй персональную долговременную память. "
+                f"Текущий участник: {user_name}. Отношение: {relation_hint}."
             ),
         }
         response = self.api.generate([system, *history])

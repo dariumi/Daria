@@ -1,5 +1,5 @@
 /**
- * DARIA Desktop v0.8.5.1
+ * DARIA Desktop v0.8.6.4
  */
 
 const state = {
@@ -17,15 +17,19 @@ const state = {
     currentPath: "",
     currentChatId: null,
     attentionEnabled: true,
+    currentFileExt: '',
+    stickerCatalog: null,
 };
 
 const defaultIcons = [
     { id: 'chat', icon: '💬', name: 'Чат', window: 'chat' },
     { id: 'self', icon: '🪞', name: 'Самоосознание', window: 'self' },
+    { id: 'todos', icon: '✅', name: 'Списки дел', window: 'todos' },
     { id: 'senses', icon: '👁️', name: 'Сенсоры', window: 'senses' },
     { id: 'wiki', icon: '📚', name: 'Wiki', window: 'wiki' },
     { id: 'updater', icon: '⬆️', name: 'Обновления', window: 'updater' },
     { id: 'files', icon: '📁', name: 'Файлы', window: 'files' },
+    { id: 'daria-games', icon: '🎮', name: 'Игры Даши', window: 'daria-games' },
     { id: 'terminal', icon: '💻', name: 'Терминал', window: 'terminal' },
     { id: 'browser', icon: '🌐', name: 'Браузер', window: 'browser' },
     { id: 'player', icon: '🎵', name: 'Плеер', window: 'player' },
@@ -38,10 +42,12 @@ const defaultIcons = [
 const windowConfigs = {
     chat: { icon: '💬', title: 'Чат с Дарьей', width: 600, height: 500 },
     self: { icon: '🪞', title: 'Самоосознание Даши', width: 520, height: 520 },
+    todos: { icon: '✅', title: 'Списки дел', width: 560, height: 560 },
     senses: { icon: '👁️', title: 'Сенсоры', width: 560, height: 560 },
     wiki: { icon: '📚', title: 'Wiki', width: 760, height: 560 },
     updater: { icon: '⬆️', title: 'Обновления', width: 560, height: 540 },
     files: { icon: '📁', title: 'Файлы', width: 550, height: 400 },
+    'daria-games': { icon: '🎮', title: 'Игры Даши', width: 620, height: 430 },
     terminal: { icon: '💻', title: 'Терминал', width: 600, height: 400 },
     browser: { icon: '🌐', title: 'Браузер', width: 800, height: 600 },
     player: { icon: '🎵', title: 'Плеер', width: 320, height: 420 },
@@ -69,8 +75,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     initProactivePolling();
     initMoodBehavior();
     checkFirstVisit();
+    applyStartupDeepLink();
     window.addEventListener('resize', () => { state.isMobile = window.innerWidth < 768; });
 });
+
+function applyStartupDeepLink() {
+    try {
+        const params = new URLSearchParams(window.location.search || '');
+        const open = (params.get('open') || '').toLowerCase();
+        if (open === 'logs') {
+            openWindow('logs');
+        } else if (open && windowConfigs[open]) {
+            openWindow(open);
+        }
+    } catch (e) {}
+}
 
 async function initConnection() {
     try {
@@ -363,29 +382,47 @@ function initNotifications() {
 }
 
 function showNotification(notif) {
+    const performAction = () => {
+        if (!notif?.action) return;
+        if (notif.action === 'open_chat') {
+            openWindow('chat');
+            return;
+        }
+        if (notif.action.startsWith('open_window:')) {
+            const winId = notif.action.split(':')[1];
+            if (winId) openWindow(winId);
+            return;
+        }
+        if (notif.action.startsWith('open_file:')) {
+            const relPath = notif.action.slice('open_file:'.length);
+            openWindow('files');
+            setTimeout(() => openFile(relPath), 120);
+        }
+    };
     // Show in-app notification
     const container = document.getElementById('notifications-container');
     if (container) {
         const el = document.createElement('div');
         el.className = `notification ${notif.type || 'info'}`;
         el.innerHTML = `<span>${notif.icon || '💬'}</span><div><b>${notif.title}</b><p>${notif.message}</p></div><button onclick="this.parentElement.remove()">×</button>`;
-        el.onclick = () => { if (notif.action === 'open_chat') openWindow('chat'); };
+        el.onclick = () => performAction();
         container.appendChild(el);
         setTimeout(() => el.remove(), notif.duration || 5000);
     }
     
-    // Show system notification if requested and permitted
-    if (notif.system && 'Notification' in window && Notification.permission === 'granted') {
+    // Browser notification duplicate (if permission granted)
+    const shouldNative = ('Notification' in window && Notification.permission === 'granted' && notif.type !== 'mood_action');
+    if (shouldNative) {
         const sysNotif = new Notification(notif.title, {
             body: notif.message,
             icon: '/static/favicon.svg',
             tag: 'daria-' + notif.id,
-            requireInteraction: true,
+            requireInteraction: Boolean(notif.system),
         });
         
         sysNotif.onclick = () => {
             window.focus();
-            if (notif.action === 'open_chat') openWindow('chat');
+            performAction();
             sysNotif.close();
         };
         
@@ -587,6 +624,10 @@ function maximizeWindow(windowId) { state.windows.get(windowId)?.element.classLi
 function closeWindow(windowId) {
     const win = state.windows.get(windowId);
     if (win) {
+        if (windowId === 'daria-games' && dariaGamePollTimer) {
+            clearInterval(dariaGamePollTimer);
+            dariaGamePollTimer = null;
+        }
         win.element.remove();
         state.windows.delete(windowId);
         document.querySelector(`.taskbar-item[data-window="${windowId}"]`)?.remove();
@@ -612,6 +653,7 @@ function addTaskbarItem(windowId, config) {
 function initWindowContent(windowId) {
     if (windowId === 'chat') loadChatHistory();
     else if (windowId === 'self') loadSelfPerception();
+    else if (windowId === 'todos') loadTodoLists();
     else if (windowId === 'senses') initSensesWindow();
     else if (windowId === 'wiki') initWikiWindow();
     else if (windowId === 'updater') initUpdaterWindow();
@@ -621,6 +663,7 @@ function initWindowContent(windowId) {
     else if (windowId === 'logs') initLogs();
     else if (windowId === 'player') initPlayer();
     else if (windowId === 'files') loadFiles();
+    else if (windowId === 'daria-games') initDariaGamesWindow();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -634,14 +677,25 @@ async function loadChatHistory() {
         const container = document.getElementById('chat-history');
         if (!container) return;
         
-        container.innerHTML = chats.map(c => `
+        const localChats = chats.filter(c => (c.source || 'local') !== 'telegram');
+        const tgChats = chats.filter(c => (c.source || '') === 'telegram');
+        const renderItems = (items) => items.map(c => `
             <div class="chat-history-item ${c.id === state.currentChatId ? 'active' : ''}" 
                  onclick="loadChat('${c.id}')">
-                <span class="chat-preview">${c.title ? `[${c.title}] ` : ''}${c.preview || 'Новый чат'}</span>
+                <span class="chat-preview">${c.title ? `[${c.title}] ` : ''}${c.last_author ? `${c.last_author}: ` : ''}${c.preview || 'Новый чат'}</span>
                 <span class="chat-date">${new Date(c.created).toLocaleDateString('ru')}</span>
                 <button class="chat-delete" onclick="deleteChat('${c.id}', event)">×</button>
             </div>
-        `).join('') || '<p class="empty">Нет истории</p>';
+        `).join('');
+
+        let html = '';
+        if (localChats.length) {
+            html += `<div class="chat-group-title">💬 Личные чаты</div>${renderItems(localChats)}`;
+        }
+        if (tgChats.length) {
+            html += `<div class="chat-group-title">📨 Telegram</div>${renderItems(tgChats)}`;
+        }
+        container.innerHTML = html || '<p class="empty">Нет истории</p>';
     } catch (e) {}
 }
 
@@ -690,9 +744,17 @@ function sendChatMessage() {
     input.value = '';
     document.getElementById('chat-typing')?.classList.remove('hidden');
     
+    let payloadContent = content;
+    const chatContainer = document.getElementById('chat-messages');
+    const lastAssistant = chatContainer?.querySelector('.message.assistant:last-child');
+    const shortReply = content.length < 40;
+    if (shortReply && lastAssistant?.dataset?.proactive === '1') {
+        payloadContent = `Контекст: ты недавно предложила активность: "${lastAssistant.textContent}".\nОтвет пользователя: ${content}`;
+    }
+
     fetch('/api/chat', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({content, chat_id: state.currentChatId})
+        body: JSON.stringify({content: payloadContent, chat_id: state.currentChatId})
     }).then(r => r.json()).then(data => {
         document.getElementById('chat-typing')?.classList.add('hidden');
         if (data.chat_id) state.currentChatId = data.chat_id;
@@ -702,22 +764,68 @@ function sendChatMessage() {
         displaySequentialMessages(messages, 'chat-messages');
         
         loadChatHistory();
+        closeStickerPicker();
     }).catch(() => {
         document.getElementById('chat-typing')?.classList.add('hidden');
         addMessage('Ошибка соединения... 💔', 'assistant', 'chat-messages');
     });
 }
 
-function displaySequentialMessages(messages, containerId) {
+async function loadStickerCatalog() {
+    if (state.stickerCatalog) return state.stickerCatalog;
+    try {
+        const r = await fetch('/api/stickers/catalog');
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        state.stickerCatalog = await r.json();
+        return state.stickerCatalog;
+    } catch (e) {
+        return {emoji_stickers: []};
+    }
+}
+
+function closeStickerPicker() {
+    const picker = document.getElementById('chat-sticker-picker');
+    if (picker) picker.classList.add('hidden');
+}
+
+async function toggleStickerPicker(ev) {
+    if (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+    }
+    const picker = document.getElementById('chat-sticker-picker');
+    if (!picker) return;
+    if (!picker.classList.contains('hidden')) {
+        picker.classList.add('hidden');
+        return;
+    }
+    const data = await loadStickerCatalog();
+    const stickers = data.emoji_stickers || [];
+    picker.innerHTML = stickers.length
+        ? stickers.map(s => `<button type="button" class="chat-sticker-item" onclick="sendSticker('${s.replace(/'/g, "\\'")}')">${s}</button>`).join('')
+        : '<div class="empty">Стикеры недоступны</div>';
+    picker.classList.remove('hidden');
+}
+
+function sendSticker(sticker) {
+    if (!sticker) return;
+    const input = document.getElementById('chat-input');
+    if (!input) return;
+    input.value = sticker;
+    closeStickerPicker();
+    sendChatMessage();
+}
+
+function displaySequentialMessages(messages, containerId, options = {}) {
     if (!messages || messages.length === 0) return;
     
     // First message immediately
-    addMessage(messages[0], 'assistant', containerId);
+    addMessage(messages[0], 'assistant', containerId, options);
     
     // Subsequent messages with delay (simulates typing)
     for (let i = 1; i < messages.length; i++) {
         ((msg, delay) => {
-            setTimeout(() => addMessage(msg, 'assistant', containerId), delay);
+            setTimeout(() => addMessage(msg, 'assistant', containerId, options), delay);
         })(messages[i], i * (800 + messages[i].length * 15));
     }
 }
@@ -755,7 +863,7 @@ function handleProactiveMessage(proactive) {
     // If chat window is open, inject messages
     const chatContainer = document.getElementById('chat-messages');
     if (chatContainer) {
-        displaySequentialMessages(msgs, 'chat-messages');
+        displaySequentialMessages(msgs, 'chat-messages', {proactive: true});
     }
     
     // If it's a game suggestion, also hint on desktop
@@ -812,12 +920,16 @@ function sendQuickMessage() {
         .then(data => addMessage(data.response, 'assistant', 'quick-messages'));
 }
 
-function addMessage(content, role, containerId) {
+function addMessage(content, role, containerId, options = {}) {
     const container = document.getElementById(containerId);
     if (!container) return;
     const msg = document.createElement('div');
     msg.className = `message ${role}`;
-    msg.textContent = content;
+    const text = String(content || '');
+    msg.textContent = text;
+    const emojiOnly = /^(?:[\p{Emoji}\uFE0F\u200D]\s*){1,3}$/u.test(text.trim());
+    if (emojiOnly) msg.classList.add('sticker');
+    if (options.proactive) msg.dataset.proactive = '1';
     container.appendChild(msg);
     container.scrollTop = container.scrollHeight;
 }
@@ -837,16 +949,27 @@ async function loadFiles(path = "") {
     try {
         const r = await fetch(`/api/files?path=${encodeURIComponent(path)}`);
         const data = await r.json();
-        let html = path ? `<div class="file-item" ondblclick="loadFiles('${path.split('/').slice(0,-1).join('/')}')"><span>📁</span>..</div>` : '';
+        let html = path ? `<div class="file-item" ondblclick="goParentDirectory()"><span>📁</span>..</div>` : '';
         data.items.forEach(item => {
             const icon = item.is_dir ? '📁' : '📄';
-            html += `<div class="file-item" ondblclick="${item.is_dir ? `loadFiles('${item.path}')` : `openFile('${item.path}')`}">
+            const encodedPath = encodeURIComponent(item.path || '');
+            html += `<div class="file-item" ondblclick="${item.is_dir ? `loadFiles(decodeURIComponent('${encodedPath}'))` : `openFile(decodeURIComponent('${encodedPath}'))`}">
                 <span>${icon}</span><span class="name">${item.name}</span>
-                <button onclick="deleteFile('${item.path}',event)">🗑️</button>
+                <button onclick="deleteFile(decodeURIComponent('${encodedPath}'),event)">🗑️</button>
             </div>`;
         });
         list.innerHTML = html || '<div class="empty">Пусто</div>';
     } catch (e) { list.innerHTML = '<div class="empty">Ошибка</div>'; }
+}
+
+function goParentDirectory() {
+    const p = (state.currentPath || '').replace(/\/+$/, '');
+    if (!p) {
+        loadFiles('');
+        return;
+    }
+    const parent = p.includes('/') ? p.split('/').slice(0, -1).join('/') : '';
+    loadFiles(parent);
 }
 
 async function openFile(path) {
@@ -855,8 +978,20 @@ async function openFile(path) {
         const data = await r.json();
         document.getElementById('file-editor-path').value = path;
         document.getElementById('file-editor-content').value = data.content || '';
+        state.currentFileExt = data.ext || '';
+        const kind = document.getElementById('file-editor-kind');
+        if (kind) kind.textContent = `Формат: ${state.currentFileExt || 'text'}`;
         const promptEl = document.getElementById('file-assist-prompt');
         if (promptEl) promptEl.value = '';
+        const log = document.getElementById('file-assist-log');
+        if (log) log.innerHTML = '<div class="empty">Панель помощника готова. Выдели фрагмент или опиши задачу.</div>';
+        const panel = document.getElementById('file-assist-panel');
+        const body = document.querySelector('#file-editor .editor-body');
+        if (panel) {
+            panel.classList.add('hidden');
+            panel.classList.remove('open');
+        }
+        body?.classList.remove('assist-open');
         document.getElementById('file-editor').classList.remove('hidden');
     } catch (e) {}
 }
@@ -869,7 +1004,41 @@ async function saveFile() {
     loadFiles(state.currentPath);
 }
 
-function closeEditor() { document.getElementById('file-editor')?.classList.add('hidden'); }
+function closeEditor() {
+    const editor = document.getElementById('file-editor');
+    const panel = document.getElementById('file-assist-panel');
+    const body = editor?.querySelector('.editor-body');
+    panel?.classList.add('hidden');
+    panel?.classList.remove('open');
+    body?.classList.remove('assist-open');
+    editor?.classList.add('hidden');
+}
+
+function toggleFileAssistPanel() {
+    const panel = document.getElementById('file-assist-panel');
+    const editor = document.getElementById('file-editor');
+    if (!panel || !editor) return;
+    const wnd = editor.closest('.window');
+    const isOpen = panel.classList.contains('open');
+
+    if (isOpen) {
+        panel.classList.remove('open');
+        panel.classList.add('hidden');
+        editor.querySelector('.editor-body')?.classList.remove('assist-open');
+        return;
+    }
+
+    panel.classList.remove('hidden');
+    panel.classList.add('open');
+    editor.querySelector('.editor-body')?.classList.add('assist-open');
+    if (wnd && !state.isMobile) {
+        const baseWidth = parseInt(String(wnd.offsetWidth), 10);
+        const extra = 330;
+        const maxW = Math.max(520, window.innerWidth - (wnd.offsetLeft || 0) - 20);
+        const nextW = Math.min(baseWidth + extra, maxW);
+        if (nextW > baseWidth) wnd.style.width = nextW + 'px';
+    }
+}
 
 async function assistFileWithDaria() {
     const path = document.getElementById('file-editor-path')?.value;
@@ -877,18 +1046,52 @@ async function assistFileWithDaria() {
     if (!path || !instruction) return;
     const contentEl = document.getElementById('file-editor-content');
     const applyBtn = document.getElementById('file-assist-apply-btn');
+    const log = document.getElementById('file-assist-log');
     try {
         if (applyBtn) applyBtn.disabled = true;
+        const selStart = contentEl?.selectionStart ?? 0;
+        const selEnd = contentEl?.selectionEnd ?? 0;
+        const selectedText = (contentEl && selEnd > selStart) ? contentEl.value.slice(selStart, selEnd) : '';
+        if (log) {
+            const row = document.createElement('div');
+            row.className = 'assist-line user';
+            row.textContent = instruction;
+            log.appendChild(row);
+            log.scrollTop = log.scrollHeight;
+        }
         const r = await fetch('/api/chat/file-assist', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({path, instruction}),
+            body: JSON.stringify({
+                path, instruction,
+                selected_text: selectedText,
+                selection_start: selStart,
+                selection_end: selEnd,
+            }),
         });
         const data = await r.json();
         if (data.error) throw new Error(data.error);
         if (contentEl) contentEl.value = data.content || '';
+        const promptEl = document.getElementById('file-assist-prompt');
+        if (promptEl) promptEl.value = '';
+        if (log) {
+            const row = document.createElement('div');
+            row.className = 'assist-line dasha';
+            row.textContent = data.selection_applied === false
+                ? 'Не нашла выбранный фрагмент, оставила текст как есть.'
+                : 'Готово, внесла изменения.';
+            log.appendChild(row);
+            log.scrollTop = log.scrollHeight;
+        }
         showNotification({title: 'Файл', message: 'Даша подготовила правки', type: 'success', icon: '🌸', duration: 3500});
     } catch (e) {
+        if (log) {
+            const row = document.createElement('div');
+            row.className = 'assist-line dasha';
+            row.textContent = `Ошибка: ${e.message || e}`;
+            log.appendChild(row);
+            log.scrollTop = log.scrollHeight;
+        }
         showNotification({title: 'Файл', message: `Ошибка: ${e.message || e}`, type: 'error', icon: '⚠️', duration: 4500});
     } finally {
         if (applyBtn) applyBtn.disabled = false;
@@ -951,9 +1154,131 @@ function executeTerminal() {
     output.scrollTop = output.scrollHeight;
 }
 
-function browserGo() { const url = document.getElementById('browser-url')?.value; document.getElementById('browser-frame').src = url; }
+function browserGo() {
+    const input = document.getElementById('browser-url');
+    const frame = document.getElementById('browser-frame');
+    if (!input || !frame) return;
+    let url = (input.value || '').trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+    input.value = url;
+    frame.src = `/api/browser/proxy?url=${encodeURIComponent(url)}`;
+}
 function browserBack() { document.getElementById('browser-frame')?.contentWindow?.history.back(); }
 function browserForward() { document.getElementById('browser-frame')?.contentWindow?.history.forward(); }
+
+let dariaGamePollTimer = null;
+function initDariaGamesWindow() {
+    if (dariaGamePollTimer) clearInterval(dariaGamePollTimer);
+    loadDariaGameState();
+    dariaGamePollTimer = setInterval(loadDariaGameState, 1500);
+}
+
+async function startDariaGame() {
+    const mode = document.getElementById('daria-game-mode')?.value || 'associations';
+    const opponent = document.getElementById('daria-game-opponent')?.value || 'bot';
+    try {
+        await fetch('/api/daria-games/start', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({reason: 'manual_ui', mode, opponent}),
+        });
+    } catch (e) {}
+    loadDariaGameState();
+}
+
+async function stopDariaGame() {
+    try {
+        await fetch('/api/daria-games/stop', {method: 'POST'});
+    } catch (e) {}
+    loadDariaGameState();
+}
+
+async function loadDariaGameState() {
+    const log = document.getElementById('daria-game-log');
+    const status = document.getElementById('daria-game-status');
+    const score = document.getElementById('daria-game-score');
+    const board = document.getElementById('daria-game-board');
+    if (!log || !status || !score || !board) return;
+    try {
+        const r = await fetch('/api/daria-games/state');
+        const s = await r.json();
+        status.textContent = s.running ? `Статус: игра идёт (${s.game})` : `Статус: ожидание (${s.game})`;
+        score.textContent = `Счёт: ${s.score_dasha || 0} - ${s.score_shadow || 0}`;
+        board.innerHTML = renderGameBoard(s);
+        const lines = (s.moves || []).map(m => {
+            const role = String(m.role || '').toLowerCase();
+            const c = role.includes('system') ? 'system' : (role.includes('dasha') ? 'dasha' : 'user');
+            return `<div class="daria-games-line ${c}"><b>${m.author}:</b> ${m.text}</div>`;
+        }).join('');
+        log.innerHTML = lines || '<div class="empty">Пока ходов нет</div>';
+        log.scrollTop = log.scrollHeight;
+    } catch (e) {
+        status.textContent = 'Статус: ошибка соединения';
+    }
+}
+
+function renderGameBoard(s) {
+    if (s.mode === 'battleship' && s.battleship) {
+        const enemy = s.battleship.dasha_shots || [];
+        const own = s.battleship.dasha_board_public || [];
+        const renderGrid = (grid, type, isEnemy) => {
+            let html = `<div class="battle-grid-wrap"><div class="battle-grid-title">${type}</div><div class="battle-grid">`;
+            for (let r = 0; r < 10; r++) {
+                for (let c = 0; c < 10; c++) {
+                    const v = grid?.[r]?.[c] ?? 0;
+                    let cls = 'cell-water';
+                    if (isEnemy) {
+                        cls = v === 2 ? 'cell-hit' : v === 1 ? 'cell-miss' : 'cell-unknown';
+                    } else {
+                        cls = v === 3 ? 'cell-hit' : v === 1 ? 'cell-miss' : v === 2 ? 'cell-ship' : 'cell-water';
+                    }
+                    html += `<div class="battle-cell ${cls}" title="${String.fromCharCode(65 + c)}${r + 1}"></div>`;
+                }
+            }
+            html += `</div></div>`;
+            return html;
+        };
+        let out = `<div class="battle-boards">${renderGrid(enemy, 'Поле соперника', true)}${renderGrid(own, 'Поле Даши', false)}</div>`;
+        out += `<div class="battle-meta">Ход: ${s.battleship.turn_owner || '—'}</div>`;
+        if (s.winner) out += `<div class="battle-meta">Победитель: ${s.winner}</div>`;
+        if (s.reward) out += `<div class="battle-meta">Награда: ${s.reward}</div>`;
+        return out;
+    }
+    if (s.mode === 'maze2d' && s.maze?.grid) {
+        const g = s.maze.grid;
+        const p = s.maze.pos || [0, 0];
+        const goal = s.maze.goal || [g.length - 1, g.length - 1];
+        let out = '2D Лабиринт\n';
+        for (let r = 0; r < g.length; r++) {
+            let line = '';
+            for (let c = 0; c < g[r].length; c++) {
+                if (r === p[0] && c === p[1]) line += '🩷';
+                else if (r === goal[0] && c === goal[1]) line += '🏁';
+                else line += g[r][c] ? '⬛' : '⬜';
+            }
+            out += line + '\n';
+        }
+        if (s.reward) out += `Награда: ${s.reward}\n`;
+        return `<pre>${out}</pre>`;
+    }
+    return '<pre>Ассоциации: здесь идёт ролевая игра ходов.\nСледи за мини-чатом ниже.</pre>';
+}
+
+async function sendDariaGameMessage() {
+    const input = document.getElementById('daria-game-input');
+    const text = input?.value?.trim();
+    if (!text) return;
+    input.value = '';
+    try {
+        await fetch('/api/daria-games/action', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({text}),
+        });
+    } catch (e) {}
+    loadDariaGameState();
+}
 
 function initPlayer() {
     state.audio = document.getElementById('player-audio');
@@ -969,12 +1294,67 @@ function initPlayer() {
 }
 
 function formatTime(s) { return isNaN(s) ? '0:00' : `${Math.floor(s/60)}:${Math.floor(s%60).toString().padStart(2,'0')}`; }
-function playerLoad(files) { if(files?.[0]&&state.audio){state.audio.src=URL.createObjectURL(files[0]);document.querySelector('.player-title').textContent=files[0].name;state.audio.load();}}
-function playerPlay() { if(!state.audio)return; state.audioPlaying?state.audio.pause():state.audio.play(); state.audioPlaying=!state.audioPlaying; updatePlayBtn(); }
+function playerLoad(files) {
+    if(files?.[0]&&state.audio){
+        state.audio.src=URL.createObjectURL(files[0]);
+        document.querySelector('.player-title').textContent=files[0].name;
+        state.audio.load();
+        fetch('/api/music/listen', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({title: files[0].name, source: 'local-file'}),
+        }).catch(()=>{});
+    }
+}
+async function playerPlay() {
+    if (!state.audio) return;
+    if (state.audioPlaying) {
+        state.audio.pause();
+        state.audioPlaying = false;
+        updatePlayBtn();
+        return;
+    }
+    try {
+        await state.audio.play();
+        state.audioPlaying = true;
+        updatePlayBtn();
+    } catch (e) {
+        state.audioPlaying = false;
+        updatePlayBtn();
+    }
+}
 function updatePlayBtn() { document.getElementById('player-play-btn').textContent = state.audioPlaying ? '⏸' : '▶'; }
 function playerVolume(v) { if(state.audio) state.audio.volume = v/100; }
 function playerPrev() { if(state.audio) state.audio.currentTime = 0; }
 function playerNext() {}
+
+async function dashaListenTrack() {
+    const input = document.getElementById('music-title-input');
+    const title = input?.value?.trim();
+    if (!title) return;
+    try {
+        const r = await fetch('/api/music/listen', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({title, source: title.includes('http') ? 'link' : 'manual'}),
+        });
+        const data = await r.json();
+        if (data.status === 'ok') {
+            showNotification({
+                title: '🎧 Даша',
+                message: `Послушала: ${data.listen.title} (${data.listen.mood})`,
+                type: 'success',
+                icon: '🎵',
+                duration: 5000,
+            });
+            if (input) input.value = '';
+        } else {
+            throw new Error(data.error || 'Ошибка');
+        }
+    } catch (e) {
+        showNotification({title: '🎵', message: `Не удалось: ${e.message || e}`, type: 'error', icon: '⚠️', duration: 4500});
+    }
+}
 
 async function initLogs() {
     await refreshLogs();
@@ -1375,14 +1755,17 @@ function mdToHtml(md) {
 
 async function sensesSee() {
     const input = document.getElementById('senses-see-input');
+    const file = document.getElementById('senses-see-file')?.files?.[0];
     const out = document.getElementById('senses-output');
-    if (!input?.value?.trim() || !out) return;
+    if ((!input?.value?.trim() && !file) || !out) return;
     out.textContent = 'Думаю...';
     try {
+        const fd = new FormData();
+        if (input?.value?.trim()) fd.append('description', input.value.trim());
+        if (file) fd.append('image', file);
         const r = await fetch('/api/senses/see', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({description: input.value.trim()}),
+            body: fd,
         });
         const data = await r.json();
         out.textContent = data.result || data.error || 'Нет ответа';
@@ -1393,14 +1776,17 @@ async function sensesSee() {
 
 async function sensesHear() {
     const input = document.getElementById('senses-hear-input');
+    const file = document.getElementById('senses-hear-file')?.files?.[0];
     const out = document.getElementById('senses-output');
-    if (!input?.value?.trim() || !out) return;
+    if ((!input?.value?.trim() && !file) || !out) return;
     out.textContent = 'Слушаю...';
     try {
+        const fd = new FormData();
+        if (input?.value?.trim()) fd.append('transcript', input.value.trim());
+        if (file) fd.append('audio', file);
         const r = await fetch('/api/senses/hear', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({transcript: input.value.trim()}),
+            body: fd,
         });
         const data = await r.json();
         out.textContent = data.result || data.error || 'Нет ответа';
@@ -1412,6 +1798,114 @@ async function sensesHear() {
 function initSensesWindow() {
     const out = document.getElementById('senses-output');
     if (out) out.textContent = 'Опиши, что ты видишь или слышишь — Даша разберёт смысл.';
+}
+
+async function loadTodoLists() {
+    const userList = document.getElementById('todo-user-list');
+    const dashaList = document.getElementById('todo-dasha-list');
+    const dateEl = document.getElementById('todo-date');
+    if (!userList || !dashaList) return;
+    userList.innerHTML = '<div class="loading">Загрузка...</div>';
+    dashaList.innerHTML = '<div class="loading">Загрузка...</div>';
+    try {
+        const r = await fetch('/api/tasks');
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        if (dateEl) dateEl.textContent = data.date || '—';
+        userList.innerHTML = renderTodoItems(data.user_tasks || []);
+        dashaList.innerHTML = renderDashaTodoItems(data.dasha_tasks || []);
+        const planEl = document.getElementById('todo-plan-summary');
+        if (planEl) {
+            const current = data.current_task?.title ? `Сейчас: ${data.current_task.title}` : 'Сейчас: свободна';
+            const recent = (data.activity_log || []).slice(-3).map(a => `• ${a.title}`).join('<br>');
+            planEl.innerHTML = `${current}<br>${recent || '• Активность появится после первых задач'}`;
+        }
+    } catch (e) {
+        userList.innerHTML = '<div class="empty">Ошибка загрузки</div>';
+        dashaList.innerHTML = '<div class="empty">Ошибка загрузки</div>';
+    }
+}
+
+async function askDashaPlans() {
+    try {
+        const r = await fetch('/api/tasks/plans');
+        const data = await r.json();
+        openWindow('chat');
+        if (data?.summary) {
+            addMessage(data.summary, 'assistant', 'chat-messages');
+        }
+    } catch (e) {}
+}
+
+function renderTodoItems(items) {
+    if (!items.length) return '<div class="empty">Пока пусто</div>';
+    return items.map(t => `
+        <div class="todo-item ${t.done ? 'done' : ''}">
+            <label><input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask('${t.id}', this.checked)"> ${t.done ? '✅' : '📝'} ${t.title}</label>
+            <button onclick="deleteTask('${t.id}')">🗑️</button>
+        </div>
+    `).join('');
+}
+
+function renderDashaTodoItems(items) {
+    if (!items.length) return '<div class="empty">Пока пусто</div>';
+    const open = items.filter(t => !t.done);
+    const done = items.filter(t => t.done);
+    const doneAgg = {};
+    for (const t of done) {
+        const key = t.title || 'Без названия';
+        doneAgg[key] = (doneAgg[key] || 0) + 1;
+    }
+    const openHtml = open.map(t => `
+        <div class="todo-item">
+            <label><input type="checkbox" onchange="toggleTask('${t.id}', true)"> 📝 ${t.title}</label>
+            <button onclick="deleteTask('${t.id}')">🗑️</button>
+        </div>
+    `).join('');
+    const doneRows = Object.entries(doneAgg).map(([title, count]) => `
+        <div class="todo-item done aggregate">
+            <label>✅ ${title} <span class="todo-count">×${count}</span></label>
+        </div>
+    `).join('');
+    return (openHtml || '<div class="empty">Нет активных дел</div>') + (doneRows ? `<div class="todo-group-title">Сделано</div>${doneRows}` : '');
+}
+
+async function addUserTask() {
+    const input = document.getElementById('todo-user-input');
+    const title = input?.value?.trim();
+    if (!title) return;
+    const r = await fetch('/api/tasks/user/add', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({title}),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    input.value = '';
+    loadTodoLists();
+}
+
+async function generateDashaTasks() {
+    const r = await fetch('/api/tasks/generate-dasha-day', {method: 'POST'});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    loadTodoLists();
+}
+
+async function toggleTask(id, done) {
+    await fetch('/api/tasks/toggle', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id, done}),
+    });
+    loadTodoLists();
+}
+
+async function deleteTask(id) {
+    await fetch('/api/tasks/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id}),
+    });
+    loadTodoLists();
 }
 
 async function initWikiWindow() {
@@ -1455,6 +1949,11 @@ function toggleStartMenu() { document.getElementById('start-menu')?.classList.to
 document.addEventListener('click', e => {
     const menu = document.getElementById('start-menu'), btn = document.getElementById('start-button');
     if(menu && btn && !menu.contains(e.target) && !btn.contains(e.target)) menu.classList.add('hidden');
+    const picker = document.getElementById('chat-sticker-picker');
+    const toggle = e.target?.closest?.('.chat-sticker-toggle');
+    if (picker && !picker.classList.contains('hidden') && !picker.contains(e.target) && !toggle) {
+        picker.classList.add('hidden');
+    }
 });
 
 function checkFirstVisit() { if(!localStorage.getItem('daria_visited')) document.getElementById('welcome-modal')?.classList.remove('hidden'); }
