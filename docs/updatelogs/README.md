@@ -10,6 +10,10 @@
 - [UPDATELOG_v0.8.6.2.md](UPDATELOG_v0.8.6.2.md)
 - [UPDATELOG_v0.8.6.3.md](UPDATELOG_v0.8.6.3.md)
 - [UPDATELOG_v0.8.6.4.md](UPDATELOG_v0.8.6.4.md)
+- [UPDATELOG_v0.9.0.md](UPDATELOG_v0.9.0.md)
+- [UPDATELOG_v0.9.1.md](UPDATELOG_v0.9.1.md)
+- [UPDATELOG_v0.9.2.md](UPDATELOG_v0.9.2.md)
+- [UPDATELOG_v0.8.7.md](UPDATELOG_v0.8.7.md)
 
 ## Notes
 

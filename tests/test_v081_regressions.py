@@ -57,6 +57,37 @@ class TestV081Regressions(unittest.TestCase):
         self.assertEqual(data.get("status"), "ok")
         self.assertTrue(data.get("chat_id", "").startswith("telegram_"))
 
+    def test_external_generate_endpoint(self):
+        class DummyBrain:
+            def generate_external(self, text, **kwargs):
+                return {
+                    "response": "внешний ответ",
+                    "messages": ["внешний ответ"],
+                    "extra_messages": [],
+                    "state": {"mood": "calm"},
+                    "emotion": "default",
+                }
+
+        old_get_brain = web_app.get_brain
+        web_app.get_brain = lambda: DummyBrain()
+        try:
+            client = web_app.app.test_client()
+            resp = client.post("/api/chat/external/generate", json={
+                "source": "telegram",
+                "source_chat_id": "tg-123",
+                "content": "привет",
+                "save_chat": False,
+                "persist_memory": False,
+            })
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertEqual(data.get("status"), "ok")
+            self.assertEqual(data.get("response"), "внешний ответ")
+            self.assertEqual(data.get("source"), "telegram")
+            self.assertEqual(data.get("source_chat_id"), "tg-123")
+        finally:
+            web_app.get_brain = old_get_brain
+
     def test_self_perception_endpoint(self):
         class DummyBrain:
             def get_self_perception(self):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🌸 DARIA v0.8.6.4 - AI Desktop Companion
+🌸 DARIA v0.9.0 - AI Desktop Companion
 """
 
 import sys
@@ -29,11 +29,12 @@ def get_version() -> str:
     version_file = Path(__file__).parent / 'VERSION'
     if version_file.exists():
         return version_file.read_text().strip()
-    return '0.8.6.4'
+    return '0.9.0'
 
 VERSION = get_version()
 TRAY_LOG_FILE = Path.home() / ".daria" / "tray.log"
 TRAY_ICON_PNG = Path.home() / ".daria" / "cache" / "tray-favicon.png"
+TRACE_LOG_FILE = Path.home() / ".daria" / "debug-trace.log"
 
 # ═══════════════════════════════════════════════════════════════════
 #  Colors
@@ -243,6 +244,14 @@ def get_os_type() -> str:
 
 def setup_server_env(os_type: str):
     """Setup environment variables based on OS"""
+    cpu_threads = max(2, min(6, int((os.cpu_count() or 4) / 2)))
+    os.environ.setdefault("HF_HOME", str(Path.home() / ".daria" / "hf-cache"))
+    os.environ.setdefault("TRANSFORMERS_CACHE", str(Path.home() / ".daria" / "hf-cache"))
+    os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(Path.home() / ".daria" / "hf-cache"))
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True,max_split_size_mb:128")
+    os.environ.setdefault("OMP_NUM_THREADS", str(cpu_threads))
+    os.environ.setdefault("MKL_NUM_THREADS", str(cpu_threads))
+    os.environ.setdefault("NUMEXPR_MAX_THREADS", str(cpu_threads))
     if os_type == 'windows':
         os.environ.setdefault('FLASK_ENV', 'production')
         os.environ.setdefault('DARIA_SERVER', 'waitress')
@@ -295,17 +304,37 @@ class ColoredFormatter(logging.Formatter):
         time_str = self.formatTime(record, '%H:%M:%S')
         return f"{color}{icon} [{time_str}] {record.getMessage()}{c.END}"
 
-def setup_logging(debug: bool = False):
+def setup_logging(debug: bool = False, trace: bool = False):
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
     logging.getLogger('flask').setLevel(logging.ERROR)
 
     level = logging.DEBUG if debug else logging.INFO
-    handler = logging.StreamHandler()
-    handler.setFormatter(ColoredFormatter())
+    stream_handler = logging.StreamHandler()
+    if trace:
+        stream_handler.setFormatter(logging.Formatter(
+            "%(asctime)s | %(levelname)s | %(name)s | %(module)s:%(funcName)s:%(lineno)d | %(message)s",
+            datefmt="%H:%M:%S",
+        ))
+    else:
+        stream_handler.setFormatter(ColoredFormatter())
+
+    root = logging.getLogger()
+    root.setLevel(level)
+    root.handlers = [stream_handler]
+
+    if trace:
+        try:
+            TRACE_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = logging.FileHandler(TRACE_LOG_FILE, encoding="utf-8")
+            file_handler.setFormatter(logging.Formatter(
+                "%(asctime)s | %(levelname)s | %(name)s | %(module)s:%(funcName)s:%(lineno)d | %(message)s"
+            ))
+            root.addHandler(file_handler)
+        except Exception:
+            pass
 
     logger = logging.getLogger('daria')
     logger.setLevel(level)
-    logger.handlers = [handler]
     return logger
 
 # ═══════════════════════════════════════════════════════════════════
@@ -364,8 +393,8 @@ def check_system():
 #  Server with animated loading (Point #10)
 # ═══════════════════════════════════════════════════════════════════
 
-def run_server(host: str, port: int, debug: bool, ssl_context):
-    logger = setup_logging(debug)
+def run_server(host: str, port: int, debug: bool, ssl_context, trace: bool = False):
+    logger = setup_logging(debug, trace=trace)
     os_type = get_os_type()
     setup_server_env(os_type)
 
@@ -468,15 +497,19 @@ def set_autostart(enabled: bool, host: str = "127.0.0.1", port: int = 7777):
         )
 
 
-def run_tray(host: str, port: int, debug: bool, ssl_context):
+def run_tray(host: str, port: int, debug: bool, ssl_context, trace: bool = False):
+    setup_logging(debug, trace=trace)
     if sys.platform.startswith("linux"):
-        os.environ.setdefault("PYSTRAY_BACKEND", "appindicator")
+        # Do not hard-force appindicator: on some DE/Wayland setups it breaks context menu behavior.
+        preferred_backend = os.environ.get("DARIA_TRAY_BACKEND", "").strip()
+        if preferred_backend:
+            os.environ["PYSTRAY_BACKEND"] = preferred_backend
     try:
         import pystray
         from PIL import Image, ImageDraw
     except Exception:
         # Fallback to normal mode if tray deps unavailable
-        run_server(host, port, debug, ssl_context)
+        run_server(host, port, debug, ssl_context, trace=trace)
         return
 
     from web.app import run_server as start_flask
@@ -543,9 +576,19 @@ def run_tray(host: str, port: int, debug: bool, ssl_context):
         proto = "https" if ssl_context else "http"
         webbrowser.open(f"{proto}://localhost:{port}")
 
-    def open_logs_ui(_icon=None, _item=None):
-        proto = "https" if ssl_context else "http"
-        webbrowser.open(f"{proto}://localhost:{port}/?open=logs")
+    def open_trace_log(_icon=None, _item=None):
+        try:
+            TRACE_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            if not TRACE_LOG_FILE.exists():
+                TRACE_LOG_FILE.write_text("Trace log initialized.\n", encoding="utf-8")
+            if sys.platform.startswith("linux"):
+                subprocess.Popen(["xdg-open", str(TRACE_LOG_FILE)])
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(TRACE_LOG_FILE)])
+            elif sys.platform == "win32":
+                os.startfile(str(TRACE_LOG_FILE))  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
     def open_log_file(_icon=None, _item=None):
         try:
@@ -574,7 +617,7 @@ def run_tray(host: str, port: int, debug: bool, ssl_context):
 
     menu = pystray.Menu(
         pystray.MenuItem("Открыть DARIA", open_ui, default=True),
-        pystray.MenuItem("Открыть лог-консоль", open_logs_ui),
+        pystray.MenuItem("Открыть trace-лог", open_trace_log),
         pystray.MenuItem("Открыть лог-файл", open_log_file),
         pystray.MenuItem("Автозапуск", toggle_autostart),
         pystray.MenuItem("Выход", quit_all),
@@ -595,6 +638,7 @@ def main():
     parser.add_argument('--host', default='127.0.0.1', help='Хост')
     parser.add_argument('--port', type=int, default=7777, help='Порт')
     parser.add_argument('--debug', action='store_true', help='Debug')
+    parser.add_argument('--debug-trace', action='store_true', help='Трассировка запросов/функций в терминал и ~/.daria/debug-trace.log')
     parser.add_argument('--ssl', action='store_true', help='HTTPS')
     parser.add_argument('--ssl-cert', help='SSL сертификат')
     parser.add_argument('--ssl-key', help='SSL ключ')
@@ -646,6 +690,8 @@ def main():
             ]
             if args.debug:
                 cmd.append("--debug")
+            if args.debug_trace:
+                cmd.append("--debug-trace")
             if args.ssl:
                 cmd.append("--ssl")
             if args.ssl_cert:
@@ -665,9 +711,9 @@ def main():
 
     try:
         if args.tray:
-            run_tray(args.host, args.port, args.debug, ssl_context)
+            run_tray(args.host, args.port, args.debug, ssl_context, trace=args.debug_trace)
         else:
-            run_server(args.host, args.port, args.debug, ssl_context)
+            run_server(args.host, args.port, args.debug, ssl_context, trace=args.debug_trace)
     except KeyboardInterrupt:
         no_sleep.stop()
         print(f"\n  {c.PINK}👋 Пока-пока! До встречи! 🌸{c.END}\n")

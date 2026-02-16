@@ -126,11 +126,29 @@ class WorkingMemory:
             self.turns = self.turns[-self.max_turns:]
         
         self._save()
+
+    @staticmethod
+    def _is_internal_noise_turn(user_msg: str) -> bool:
+        t = (user_msg or "").strip().lower()
+        if not t:
+            return False
+        return (
+            t.startswith("пользователь попросила нарисовать картинку:")
+            and "подтверди, что начала рисовать" in t
+        )
     
     def get_messages_for_llm(self, limit: int = 15) -> List[Dict[str, str]]:
         """Get conversation history for LLM context"""
         messages = []
-        for turn in self.turns[-limit:]:
+        selected: List[ConversationTurn] = []
+        # Select last N user-visible turns, skipping internal synthetic turns.
+        for turn in reversed(self.turns):
+            if self._is_internal_noise_turn(turn.user_message):
+                continue
+            selected.append(turn)
+            if len(selected) >= limit:
+                break
+        for turn in reversed(selected):
             messages.append({"role": "user", "content": turn.user_message})
             messages.append({"role": "assistant", "content": turn.assistant_response})
         return messages
@@ -146,7 +164,14 @@ class WorkingMemory:
         if not self.turns:
             return ""
         
-        recent = self.turns[-5:]
+        recent: List[ConversationTurn] = []
+        for turn in reversed(self.turns):
+            if self._is_internal_noise_turn(turn.user_message):
+                continue
+            recent.append(turn)
+            if len(recent) >= 5:
+                break
+        recent = list(reversed(recent))
         summary_parts = []
         for turn in recent:
             u = turn.user_message.replace("\n", " ").strip()[:90]
@@ -305,6 +330,11 @@ class FactExtractor:
                     if fact_type == "user_name":
                         if value in self.EXCLUDED_NAMES or len(value) < 2:
                             continue
+                        # Skip obvious short noise, latin/mixed tokens and service words.
+                        if len(value) <= 3 and value not in {"ива", "оля", "юля", "аня", "ира"}:
+                            continue
+                        if re.search(r"[a-zA-Z]", value):
+                            continue
                         value = value.capitalize()
                     facts[fact_type] = value
                     break
@@ -335,6 +365,10 @@ class MemoryManager:
         
         # Extract and save facts
         facts = self.fact_extractor.extract(user_msg)
+        # Respect explicit locked user_name from settings/profile.
+        locked_name = self.get_user_profile().get("user_name_locked", "false").lower() == "true"
+        if locked_name and "user_name" in facts:
+            facts.pop("user_name", None)
         for key, value in facts.items():
             self.long_term.store_fact(key, value)
             self.long_term.set_profile(key, value)

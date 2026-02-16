@@ -8,6 +8,7 @@
 
 import os, sys, subprocess, platform, shutil, socket, json
 from pathlib import Path
+from typing import Any, Dict
 
 def _read_version() -> str:
     try:
@@ -30,7 +31,10 @@ INSTALL_PROFILES = {
         "id": "recommended",
         "label": "Рекомендуемая",
         "desc": "Ядро + визуальные/офисные функции + трей.",
-        "extras": ["Pillow>=10.0.0", "pystray>=0.19.5", "python-docx>=1.1.0", "openpyxl>=3.1.2"],
+        "extras": [
+            "Pillow>=10.0.0", "pystray>=0.19.5", "python-docx>=1.1.0", "openpyxl>=3.1.2",
+            "transformers>=4.45.0", "librosa>=0.10.2",
+        ],
     },
     "3": {
         "id": "full",
@@ -39,6 +43,7 @@ INSTALL_PROFILES = {
         "extras": [
             "Pillow>=10.0.0", "pystray>=0.19.5", "python-docx>=1.1.0", "openpyxl>=3.1.2",
             "SpeechRecognition>=3.10.0", "pydub>=0.25.1",
+            "transformers>=4.45.0", "librosa>=0.10.2", "diffusers>=0.31.0", "accelerate>=1.0.0",
         ],
     },
 }
@@ -140,6 +145,12 @@ def setup_venv(info):
     pip = venv / ('Scripts' if info['is_windows'] else 'bin') / ('pip.exe' if info['is_windows'] else 'pip')
     return pip
 
+
+def get_venv_python(pip_path: Path, is_windows: bool) -> Path:
+    bindir = pip_path.parent
+    py = bindir / ('python.exe' if is_windows else 'python')
+    return py
+
 def install_deps(pip, profile):
     step("Зависимости", "📚")
     subprocess.run([str(pip), 'install', '--upgrade', 'pip', '-q'], check=True)
@@ -157,6 +168,39 @@ def install_deps(pip, profile):
         except subprocess.CalledProcessError as e:
             warn(f"Часть дополнительных зависимостей не установилась: {e}")
     return False
+
+
+def preload_models(venv_python: Path, profile: Dict[str, Any]):
+    step("Предзагрузка моделей", "🧠")
+    if profile.get("id") == "base":
+        info("Для базового профиля предзагрузка пропущена")
+        return
+    try:
+        ans = input(f"  {C.CYAN}Скачать модели заранее (без повторов)? [Y/n]: {C.END}").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        ans = "y"
+    if ans == "n":
+        info("Предзагрузка пропущена")
+        return
+    env = os.environ.copy()
+    env.setdefault("HF_HOME", str(Path.home() / ".daria" / "hf-cache"))
+    code = (
+        "import logging\n"
+        "from web.image_pipeline import ImagePipeline\n"
+        "p=ImagePipeline(logging.getLogger('daria.preload'))\n"
+        "settings={"
+        "'image_gen_model':'Tongyi-MAI/Z-Image-Turbo',"
+        "'senses_vision_provider':'auto',"
+        "'image_gen_style_models':{}"
+        "}\n"
+        "info=p.ensure_models_cached(settings=settings, force=False)\n"
+        "print('preload:', info)\n"
+    )
+    try:
+        subprocess.run([str(venv_python), "-c", code], check=True, env=env)
+        ok("Модели предзагружены/проверены")
+    except Exception as e:
+        warn(f"Предзагрузка не завершилась: {e}")
 
 def setup_dirs(info):
     step("Директории", "📁")
@@ -417,7 +461,9 @@ def main():
 
     profile = choose_install_profile()
     pip = setup_venv(nfo)
+    venv_python = get_venv_python(pip, nfo['is_windows'])
     install_deps(pip, profile)
+    preload_models(venv_python, profile)
     daria_dir = setup_dirs(nfo)
 
     try:

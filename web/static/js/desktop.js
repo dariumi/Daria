@@ -1,5 +1,5 @@
 /**
- * DARIA Desktop v0.8.6.4
+ * DARIA Desktop v0.9.1
  */
 
 const state = {
@@ -18,40 +18,99 @@ const state = {
     currentChatId: null,
     attentionEnabled: true,
     currentFileExt: '',
+    currentFileReadOnly: false,
     stickerCatalog: null,
+    stickerPickerOpen: false,
+    calendarMonthShift: 0,
+    knowledgeResults: [],
+    chatHistoryFilter: 'all',
+    chatReplyTo: null,
+    chatAttachedImage: null,
+    imageGenJobs: new Map(),
 };
 
+function escapeHtml(s) {
+    return String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 const defaultIcons = [
-    { id: 'chat', icon: '💬', name: 'Чат', window: 'chat' },
-    { id: 'self', icon: '🪞', name: 'Самоосознание', window: 'self' },
+    { id: 'chat', icon: '💬', name: 'Разговор с Дашей', window: 'chat' },
+    { id: 'self', icon: '🪞', name: 'Состояние Даши', window: 'self' },
     { id: 'todos', icon: '✅', name: 'Списки дел', window: 'todos' },
-    { id: 'senses', icon: '👁️', name: 'Сенсоры', window: 'senses' },
-    { id: 'wiki', icon: '📚', name: 'Wiki', window: 'wiki' },
+    { id: 'senses', icon: '👁️', name: 'Чувства и восприятие', window: 'senses' },
+    { id: 'wiki', icon: '📚', name: 'База знаний', window: 'wiki' },
+    { id: 'calendar', icon: '📅', name: 'Календарь', window: 'calendar' },
     { id: 'updater', icon: '⬆️', name: 'Обновления', window: 'updater' },
     { id: 'files', icon: '📁', name: 'Файлы', window: 'files' },
-    { id: 'daria-games', icon: '🎮', name: 'Игры Даши', window: 'daria-games' },
-    { id: 'terminal', icon: '💻', name: 'Терминал', window: 'terminal' },
+    { id: 'diary', icon: '📝', name: 'Дневник Даши', window: 'diary' },
+    { id: 'knowledge', icon: '📖', name: 'Инспектор знаний', window: 'knowledge' },
+    { id: 'daria-games', icon: '🎮', name: 'Игровой центр', window: 'daria-games' },
+    { id: 'terminal', icon: '💻', name: 'Консоль', window: 'terminal' },
+    { id: 'monitor', icon: '📈', name: 'Монитор Даши', window: 'monitor' },
     { id: 'browser', icon: '🌐', name: 'Браузер', window: 'browser' },
-    { id: 'player', icon: '🎵', name: 'Плеер', window: 'player' },
+    { id: 'player', icon: '🎵', name: 'Музыка', window: 'player' },
     { id: 'store', icon: '🛒', name: 'Магазин', window: 'store' },
     { id: 'memory', icon: '🧠', name: 'Память', window: 'memory' },
     { id: 'settings', icon: '⚙️', name: 'Настройки', window: 'settings' },
     { id: 'support', icon: '☕', name: 'Поддержать', window: 'support' },
 ];
 
+const iconPacks = {
+    default: {},
+    soft: {
+        chat: '🩷', self: '🪞', todos: '🗒️', senses: '👀', wiki: '📖', calendar: '🗓️',
+        updater: '🔼', files: '🗂️', diary: '📝', knowledge: '📖', 'daria-games': '🧸', terminal: '⌨️', browser: '🧭',
+        player: '🎶', store: '🧺', memory: '💭', settings: '🔧', support: '☕'
+    },
+    line: {
+        chat: '💬', self: '🧠', todos: '✅', senses: '🎧', wiki: '📚', calendar: '📅',
+        updater: '⬆️', files: '📁', diary: '📝', knowledge: '📖', 'daria-games': '🎮', terminal: '💻', browser: '🌐',
+        player: '🎵', store: '🛒', memory: '🧠', settings: '⚙️', support: '🤍'
+    },
+    bootstrap: {
+        chat: 'bi:bi-chat-dots-fill',
+        self: 'bi:bi-person-heart',
+        todos: 'bi:bi-check2-square',
+        senses: 'bi:bi-binoculars-fill',
+        wiki: 'bi:bi-journal-richtext',
+        calendar: 'bi:bi-calendar3',
+        updater: 'bi:bi-arrow-up-circle-fill',
+        files: 'bi:bi-folder2-open',
+        diary: 'bi:bi-journal-heart',
+        knowledge: 'bi:bi-lightbulb-fill',
+        'daria-games': 'bi:bi-controller',
+        terminal: 'bi:bi-terminal-fill',
+        monitor: 'bi:bi-activity',
+        browser: 'bi:bi-globe2',
+        player: 'bi:bi-music-note-list',
+        store: 'bi:bi-shop',
+        memory: 'bi:bi-database-fill',
+        settings: 'bi:bi-sliders2-vertical',
+        support: 'bi:bi-cup-hot-fill',
+    },
+};
+
 const windowConfigs = {
-    chat: { icon: '💬', title: 'Чат с Дарьей', width: 600, height: 500 },
-    self: { icon: '🪞', title: 'Самоосознание Даши', width: 520, height: 520 },
+    chat: { icon: '💬', title: 'Разговор с Дарьей', width: 620, height: 520 },
+    self: { icon: '🪞', title: 'Состояние Даши', width: 640, height: 560 },
     todos: { icon: '✅', title: 'Списки дел', width: 560, height: 560 },
-    senses: { icon: '👁️', title: 'Сенсоры', width: 560, height: 560 },
-    wiki: { icon: '📚', title: 'Wiki', width: 760, height: 560 },
+    senses: { icon: '👁️', title: 'Чувства и восприятие', width: 620, height: 560 },
+    wiki: { icon: '📚', title: 'База знаний', width: 760, height: 560 },
+    calendar: { icon: '📅', title: 'Календарь', width: 560, height: 520 },
     updater: { icon: '⬆️', title: 'Обновления', width: 560, height: 540 },
     files: { icon: '📁', title: 'Файлы', width: 550, height: 400 },
-    'daria-games': { icon: '🎮', title: 'Игры Даши', width: 620, height: 430 },
-    terminal: { icon: '💻', title: 'Терминал', width: 600, height: 400 },
+    diary: { icon: '📝', title: 'Личный дневник Даши', width: 760, height: 560 },
+    knowledge: { icon: '📖', title: 'Инспектор знаний', width: 760, height: 560 },
+    'daria-games': { icon: '🎮', title: 'Игровой центр', width: 660, height: 460 },
+    terminal: { icon: '💻', title: 'Консоль', width: 600, height: 400 },
+    monitor: { icon: '📈', title: 'Монитор Даши', width: 420, height: 360 },
     browser: { icon: '🌐', title: 'Браузер', width: 800, height: 600 },
-    player: { icon: '🎵', title: 'Плеер', width: 320, height: 420 },
-    logs: { icon: '📋', title: 'Логи', width: 600, height: 400 },
+    player: { icon: '🎵', title: 'Музыка Даши', width: 860, height: 520 },
     store: { icon: '🛒', title: 'Магазин', width: 500, height: 450 },
     memory: { icon: '🧠', title: 'Память', width: 380, height: 400 },
     settings: { icon: '⚙️', title: 'Настройки', width: 400, height: 480 },
@@ -68,6 +127,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadSettings();
     await loadPlugins();
     initDesktopIcons();
+    initDesktopContextMenu();
     initClock();
     initAvatar();
     await initConnection();
@@ -76,6 +136,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initMoodBehavior();
     checkFirstVisit();
     applyStartupDeepLink();
+    initWallpaperRoutine();
     window.addEventListener('resize', () => { state.isMobile = window.innerWidth < 768; });
 });
 
@@ -83,8 +144,8 @@ function applyStartupDeepLink() {
     try {
         const params = new URLSearchParams(window.location.search || '');
         const open = (params.get('open') || '').toLowerCase();
-        if (open === 'logs') {
-            openWindow('logs');
+        if (open === 'logs' || open === 'debug') {
+            openWindow('terminal');
         } else if (open && windowConfigs[open]) {
             openWindow(open);
         }
@@ -114,9 +175,19 @@ async function loadSettings() {
         state.settings = await r.json();
         applyTheme(state.settings.theme || 'pink');
         applyCursor(state.settings.cursor || 'default');
+        applyIconPack(state.settings.icon_pack || 'default');
         state.attentionEnabled = state.settings.attention_enabled !== false;
         if (state.settings.wallpaper) {
             document.getElementById('desktop').style.backgroundImage = `url(${state.settings.wallpaper})`;
+        }
+        const startAvatar = document.getElementById('start-user-avatar');
+        if (startAvatar) {
+            if (state.settings.avatar) {
+                startAvatar.src = state.settings.avatar;
+                startAvatar.classList.remove('hidden');
+            } else {
+                startAvatar.classList.add('hidden');
+            }
         }
         const r2 = await fetch('/api/desktop/icons');
         state.iconPositions = await r2.json() || {};
@@ -136,7 +207,7 @@ function initDesktopIcons() {
     
     defaultIcons.forEach((ic, i) => {
         if (!state.hiddenIcons.includes(ic.id)) {
-            createDesktopIcon(container, ic, i);
+            createDesktopIcon(container, {...ic, icon: resolveIcon(ic.id, ic.icon)}, i);
         }
     });
     
@@ -150,11 +221,25 @@ function initDesktopIcons() {
     });
 }
 
+function resolveIcon(id, fallback) {
+    const pack = state.settings?.icon_pack || 'default';
+    return (iconPacks[pack] && iconPacks[pack][id]) || fallback;
+}
+
+function renderIcon(iconValue) {
+    const v = String(iconValue || '');
+    if (v.startsWith('bi:')) {
+        const cls = v.slice(3);
+        return `<i class="${cls}"></i>`;
+    }
+    return v;
+}
+
 function createDesktopIcon(container, data, index) {
     const icon = document.createElement('div');
     icon.className = 'desktop-icon';
     icon.dataset.iconId = data.id;
-    icon.innerHTML = `<div class="icon">${data.icon}</div><span>${data.name}</span>`;
+    icon.innerHTML = `<div class="icon">${renderIcon(data.icon)}</div><span>${data.name}</span>`;
     
     icon.addEventListener('dblclick', (e) => {
         e.preventDefault();
@@ -213,6 +298,14 @@ function resetIconPosition(iconId) {
         body: JSON.stringify(state.iconPositions)
     });
     initDesktopIcons();
+}
+
+function saveIconPositions() {
+    fetch('/api/desktop/icons', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(state.iconPositions || {}),
+    }).catch(() => {});
 }
 
 function initIconDrag(icon) {
@@ -386,11 +479,33 @@ function showNotification(notif) {
         if (!notif?.action) return;
         if (notif.action === 'open_chat') {
             openWindow('chat');
+            const cid = String(notif?.action_data?.chat_id || '').trim();
+            if (cid) {
+                setTimeout(() => {
+                    loadChat(cid).catch(() => {});
+                }, 140);
+            }
+            return;
+        }
+        if (notif.action === 'open_calendar') {
+            openWindow('calendar');
             return;
         }
         if (notif.action.startsWith('open_window:')) {
             const winId = notif.action.split(':')[1];
-            if (winId) openWindow(winId);
+            if (winId) {
+                openWindow(winId);
+                setTimeout(() => applyWindowOps(winId, notif?.action_data?.window_ops || {}), 100);
+                if (winId === 'browser' && notif?.action_data?.url) {
+                    setTimeout(() => {
+                        const u = document.getElementById('browser-url');
+                        if (u) {
+                            u.value = String(notif.action_data.url);
+                            browserGo();
+                        }
+                    }, 120);
+                }
+            }
             return;
         }
         if (notif.action.startsWith('open_file:')) {
@@ -408,6 +523,23 @@ function showNotification(notif) {
         el.onclick = () => performAction();
         container.appendChild(el);
         setTimeout(() => el.remove(), notif.duration || 5000);
+    }
+    if (notif?.action_data?.auto_open) {
+        setTimeout(() => performAction(), 120);
+    }
+    if (notif?.action_data?.desktop_action === 'tidy') {
+        setTimeout(() => dariaTidyDesktop(), 150);
+    }
+    if (notif?.action_data?.wallpaper) {
+        applyWallpaper(notif.action_data.wallpaper);
+    }
+    if (notif?.action_data?.wallpaper_url) {
+        applyWallpaper(`url(${notif.action_data.wallpaper_url})`);
+        fetch('/api/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({wallpaper: notif.action_data.wallpaper_url}),
+        }).catch(()=>{});
     }
     
     // Browser notification duplicate (if permission granted)
@@ -431,6 +563,150 @@ function showNotification(notif) {
     }
 }
 
+function applyWallpaper(value) {
+    const desktop = document.getElementById('desktop');
+    if (!desktop) return;
+    if (!value) return;
+    desktop.style.backgroundImage = String(value);
+}
+
+function randomGradientWallpaper() {
+    const palettes = [
+        ['#1f2937', '#334155', '#0ea5e9'],
+        ['#0f172a', '#1d4ed8', '#60a5fa'],
+        ['#3f1d2e', '#7e22ce', '#f472b6'],
+        ['#1b4332', '#2d6a4f', '#95d5b2'],
+        ['#2d1b3d', '#6d28d9', '#f9a8d4'],
+    ];
+    const p = palettes[Math.floor(Math.random() * palettes.length)];
+    return `linear-gradient(135deg, ${p[0]} 0%, ${p[1]} 55%, ${p[2]} 100%)`;
+}
+
+function initWallpaperRoutine() {
+    setInterval(() => {
+        if (!state.settings?.auto_wallpaper_change) return;
+        const w = randomGradientWallpaper();
+        applyWallpaper(w);
+    }, 1000 * 60 * 90);
+}
+
+function applyWindowOps(windowId, ops = {}) {
+    const win = state.windows.get(windowId);
+    const el = win?.element;
+    if (!el || !ops) return;
+    if (typeof ops.width === 'number') el.style.width = Math.max(320, ops.width) + 'px';
+    if (typeof ops.height === 'number') el.style.height = Math.max(220, ops.height) + 'px';
+    if (typeof ops.left === 'number') el.style.left = Math.max(0, ops.left) + 'px';
+    if (typeof ops.top === 'number') el.style.top = Math.max(0, ops.top) + 'px';
+    if (ops.maximize === true) el.classList.add('maximized');
+    if (ops.minimize === true) el.classList.add('minimized');
+    if (typeof ops.close_after_ms === 'number' && ops.close_after_ms > 0) {
+        setTimeout(() => {
+            if (state.windows.has(windowId)) closeWindow(windowId);
+        }, ops.close_after_ms);
+    }
+}
+
+function initDesktopContextMenu() {
+    const desktop = document.getElementById('desktop');
+    if (!desktop) return;
+    desktop.addEventListener('contextmenu', (e) => {
+        if (e.target.closest('.desktop-icon') || e.target.closest('.window') || e.target.closest('#taskbar')) return;
+        e.preventDefault();
+        const existing = document.querySelector('.context-menu');
+        if (existing) existing.remove();
+        const menu = document.createElement('div');
+        menu.className = 'context-menu';
+        menu.style.left = e.clientX + 'px';
+        menu.style.top = e.clientY + 'px';
+        menu.innerHTML = `
+            <div class="context-item" onclick="arrangeDesktopIcons();this.parentElement.remove()">🧩 Упорядочить иконки</div>
+            <div class="context-item" onclick="dariaTidyDesktop();this.parentElement.remove()">🧹 Навести порядок</div>
+            <div class="context-item" onclick="toggleStartMenu();this.parentElement.remove()">🌸 Пуск</div>
+            <div class="context-item" onclick="location.reload()">🔄 Обновить рабочий стол</div>
+        `;
+        document.body.appendChild(menu);
+        setTimeout(() => {
+            document.addEventListener('click', () => menu.remove(), {once: true});
+        }, 10);
+    });
+}
+
+function arrangeDesktopIcons() {
+    const container = document.getElementById('desktop-icons');
+    if (!container) return;
+    const icons = [...container.querySelectorAll('.desktop-icon')];
+    const maxRows = Math.max(4, Math.floor((window.innerHeight - 180) / 108));
+    const cols = Math.max(1, Math.ceil(icons.length / maxRows));
+    icons.forEach((el, i) => {
+        const col = Math.floor(i / maxRows);
+        const row = i % maxRows;
+        const left = 22 + col * 104;
+        const top = 20 + row * 110;
+        el.style.position = 'absolute';
+        el.style.left = left + 'px';
+        el.style.top = top + 'px';
+        state.iconPositions[el.dataset.iconId] = {x: left, y: top};
+    });
+    saveIconPositions();
+}
+
+function dariaTidyDesktop() {
+    const groups = [
+        ['chat', 'self', 'senses', 'knowledge', 'wiki'],
+        ['todos', 'calendar', 'files', 'diary', 'memory'],
+        ['player', 'daria-games', 'browser'],
+        ['settings', 'monitor', 'updater', 'store', 'terminal', 'support'],
+    ];
+    const elById = {};
+    document.querySelectorAll('.desktop-icon').forEach(el => {
+        elById[el.dataset.iconId] = el;
+    });
+    let col = 0;
+    groups.forEach((g) => {
+        let row = 0;
+        g.forEach((id) => {
+            const el = elById[id];
+            if (!el) return;
+            const left = 22 + col * 104;
+            const top = 20 + row * 110;
+            el.style.position = 'absolute';
+            el.style.left = left + 'px';
+            el.style.top = top + 'px';
+            state.iconPositions[id] = {x: left, y: top};
+            row += 1;
+        });
+        col += 1;
+    });
+    // Остальные иконки (например, плагины) укладываем после групп.
+    let extraCol = col;
+    let extraRow = 0;
+    Object.values(elById).forEach((el) => {
+        const id = el.dataset.iconId;
+        if (state.iconPositions[id]) return;
+        const left = 22 + extraCol * 104;
+        const top = 20 + extraRow * 110;
+        el.style.position = 'absolute';
+        el.style.left = left + 'px';
+        el.style.top = top + 'px';
+        state.iconPositions[id] = {x: left, y: top};
+        extraRow += 1;
+        if (extraRow > 6) {
+            extraRow = 0;
+            extraCol += 1;
+        }
+    });
+    const now = Date.now();
+    state.windows.forEach((win, id) => {
+        const ts = Number(win.lastFocusAt || 0);
+        if (state.activeWindow !== id && ts && (now - ts > 20 * 60 * 1000) && id !== 'chat') {
+            win.element.classList.add('minimized');
+        }
+    });
+    saveIconPositions();
+    showNotification({title: '🌸 Даша', message: 'Навела порядок на рабочем столе', type: 'info', icon: '🧹', duration: 3500});
+}
+
 function toggleAttention() {
     state.attentionEnabled = !state.attentionEnabled;
     fetch('/api/attention/toggle', {
@@ -450,18 +726,29 @@ async function saveSettings() {
         gender: document.getElementById('setting-gender')?.value || '',
         mode: document.getElementById('setting-mode')?.value || 'adaptive',
         theme: document.getElementById('setting-theme')?.value || 'pink',
+        day_routine_mode: document.getElementById('setting-day-routine')?.value || 'realistic',
+        icon_pack: document.getElementById('setting-icon-pack')?.value || 'default',
+        auto_wallpaper_change: document.getElementById('setting-auto-wallpaper')?.checked ?? false,
         attention_enabled: document.getElementById('setting-attention')?.checked ?? true,
+        unrestricted_topics: document.getElementById('setting-unrestricted-topics')?.checked ?? true,
+        senses_vision_provider: document.getElementById('setting-vision-provider')?.value || 'auto',
+        senses_audio_provider: document.getElementById('setting-audio-provider')?.value || 'auto',
     };
     try {
         await fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(settings)});
         state.settings = {...state.settings, ...settings};
         applyTheme(settings.theme);
+        applyIconPack(settings.icon_pack || 'default');
         showNotification({title: 'Настройки', message: 'Сохранено!', type: 'success', icon: '✅', duration: 3000});
     } catch (e) {}
 }
 
 function applyTheme(theme) { document.body.setAttribute('data-theme', theme); }
 function applyCursor(cursor) { document.body.setAttribute('data-cursor', cursor); }
+function applyIconPack(pack) {
+    state.settings.icon_pack = pack || 'default';
+    initDesktopIcons();
+}
 
 async function uploadAvatar(file) {
     if (!file) return;
@@ -469,7 +756,15 @@ async function uploadAvatar(file) {
     try {
         const r = await fetch('/api/upload/avatar', {method: 'POST', body: fd});
         const data = await r.json();
-        if (data.url) showNotification({title: 'Аватар', message: 'Загружен!', type: 'success', icon: '👤'});
+        if (data.url) {
+            state.settings.avatar = data.url;
+            const startAvatar = document.getElementById('start-user-avatar');
+            if (startAvatar) {
+                startAvatar.src = data.url;
+                startAvatar.classList.remove('hidden');
+            }
+            showNotification({title: 'Аватар', message: 'Загружен!', type: 'success', icon: '👤'});
+        }
     } catch (e) {}
 }
 
@@ -483,6 +778,51 @@ async function uploadWallpaper(file) {
     } catch (e) {}
 }
 
+async function loadBuiltinWallpapers() {
+    const sel = document.getElementById('setting-wallpaper-builtin');
+    if (!sel) return;
+    try {
+        const r = await fetch('/api/wallpapers/list');
+        const data = await r.json();
+        const items = data.items || [];
+        sel.innerHTML = items.map(i => `<option value="${i.url}">${i.name}</option>`).join('') || '<option value="">(нет)</option>';
+    } catch (e) {
+        sel.innerHTML = '<option value="">(ошибка)</option>';
+    }
+}
+
+async function applyBuiltinWallpaper() {
+    const sel = document.getElementById('setting-wallpaper-builtin');
+    if (!sel || !sel.value) return;
+    document.getElementById('desktop').style.backgroundImage = `url(${sel.value})`;
+    await fetch('/api/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({wallpaper: sel.value}),
+    });
+}
+
+async function generateWallpaper() {
+    const input = document.getElementById('setting-wallpaper-prompt');
+    const prompt = input?.value?.trim() || 'нежные абстрактные обои';
+    try {
+        const r = await fetch('/api/wallpapers/generate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({prompt, mode: 'abstract'}),
+        });
+        const data = await r.json();
+        if (data.status === 'ok' && data.url) {
+            document.getElementById('desktop').style.backgroundImage = `url(${data.url})`;
+            showNotification({title:'Обои', message:'Новые обои созданы', type:'success', icon:'🖼️', duration:2800});
+        } else {
+            showNotification({title:'Обои', message:data.error || 'Не удалось создать', type:'error', icon:'⚠️', duration:3000});
+        }
+    } catch (e) {
+        showNotification({title:'Обои', message:'Ошибка рисования', type:'error', icon:'⚠️', duration:3000});
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  Windows
 // ═══════════════════════════════════════════════════════════════
@@ -493,8 +833,11 @@ function openWindow(windowId) {
         focusWindow(windowId);
         return;
     }
-    const config = windowConfigs[windowId];
-    if (!config) return;
+    const baseConfig = windowConfigs[windowId];
+    if (!baseConfig) return;
+    const config = {...baseConfig};
+    const defaultEntry = defaultIcons.find(x => x.window === windowId);
+    if (defaultEntry) config.icon = resolveIcon(defaultEntry.id, config.icon);
     const loadPromise = createWindow(windowId, config, () => {
         const tpl = document.getElementById(windowId + '-content');
         return tpl ? tpl.content.cloneNode(true) : null;
@@ -535,7 +878,7 @@ function createWindow(windowId, config, contentFactory) {
     const template = document.getElementById('window-template');
     const windowEl = template.content.cloneNode(true).querySelector('.window');
     windowEl.dataset.windowId = windowId;
-    windowEl.querySelector('.window-icon').textContent = config.icon;
+    windowEl.querySelector('.window-icon').innerHTML = renderIcon(config.icon);
     windowEl.querySelector('.window-name').textContent = config.title;
     
     if (state.isMobile) windowEl.classList.add('maximized');
@@ -615,6 +958,7 @@ function focusWindow(windowId) {
         win.element.classList.add('focused');
         win.element.style.zIndex = ++state.windowZIndex;
         state.activeWindow = windowId;
+        win.lastFocusAt = Date.now();
         document.querySelector(`.taskbar-item[data-window="${windowId}"]`)?.classList.add('active');
     }
 }
@@ -628,6 +972,10 @@ function closeWindow(windowId) {
             clearInterval(dariaGamePollTimer);
             dariaGamePollTimer = null;
         }
+        if (windowId === 'monitor' && dariaMonitorTimer) {
+            clearInterval(dariaMonitorTimer);
+            dariaMonitorTimer = null;
+        }
         win.element.remove();
         state.windows.delete(windowId);
         document.querySelector(`.taskbar-item[data-window="${windowId}"]`)?.remove();
@@ -638,7 +986,7 @@ function addTaskbarItem(windowId, config) {
     const item = document.createElement('button');
     item.className = 'taskbar-item active';
     item.dataset.window = windowId;
-    item.innerHTML = `<span>${config.icon}</span><span>${config.title}</span>`;
+    item.innerHTML = `<span>${renderIcon(config.icon)}</span><span>${config.title}</span>`;
     item.onclick = () => {
         const win = state.windows.get(windowId);
         if (win) {
@@ -651,19 +999,194 @@ function addTaskbarItem(windowId, config) {
 }
 
 function initWindowContent(windowId) {
-    if (windowId === 'chat') loadChatHistory();
+    if (windowId === 'chat') {
+        loadChatHistory();
+        initChatComposer();
+    }
     else if (windowId === 'self') loadSelfPerception();
     else if (windowId === 'todos') loadTodoLists();
     else if (windowId === 'senses') initSensesWindow();
     else if (windowId === 'wiki') initWikiWindow();
+    else if (windowId === 'calendar') loadCalendar();
     else if (windowId === 'updater') initUpdaterWindow();
+    else if (windowId === 'monitor') initDariaMonitorWindow();
+    else if (windowId === 'browser') initBrowserWindow();
     else if (windowId === 'settings') initSettingsWindow();
     else if (windowId === 'memory') loadMemoryStats();
+    else if (windowId === 'diary') initDiaryWindow();
     else if (windowId === 'store') loadStore();
     else if (windowId === 'logs') initLogs();
     else if (windowId === 'player') initPlayer();
     else if (windowId === 'files') loadFiles();
+    else if (windowId === 'knowledge') initKnowledgeInspector();
     else if (windowId === 'daria-games') initDariaGamesWindow();
+}
+
+async function initKnowledgeInspector() {
+    const input = document.getElementById('knowledge-query');
+    if (!input) return;
+    if (!input.value.trim()) input.value = 'что такое градиентный спуск';
+    input.onkeypress = (e) => { if (e.key === 'Enter') knowledgeSearch(); };
+    await knowledgeSearch();
+}
+
+async function knowledgeSearch() {
+    const input = document.getElementById('knowledge-query');
+    const results = document.getElementById('knowledge-results');
+    if (!input || !results) return;
+    const q = input.value.trim();
+    if (!q) {
+        results.innerHTML = '<div class="empty">Введите запрос</div>';
+        return;
+    }
+    results.innerHTML = '<div class="loading">Ищу в базе...</div>';
+    try {
+        const r = await fetch(`/api/knowledge/search?q=${encodeURIComponent(q)}&limit=8`);
+        const data = await r.json();
+        const items = data.items || [];
+        if (!items.length) {
+            results.innerHTML = '<div class="empty">Ничего не найдено</div>';
+            return;
+        }
+        results.innerHTML = items.map((it, idx) => {
+            const title = escapeHtml(it.title || `Источник ${idx + 1}`);
+            const snippet = escapeHtml(it.snippet || '');
+            const path = String(it.path || '');
+            const m = path.match(/docs[\\/]+wiki[\\/]+([^\\/]+\.md)$/i);
+            const openWiki = m ? `<button onclick="knowledgeOpenWiki('${m[1].replace(/'/g, "\\'")}')">Открыть Wiki</button>` : '';
+            return `
+                <div class="knowledge-item">
+                    <div class="knowledge-head"><b>${title}</b><span class="todo-count">${escapeHtml(path)}</span></div>
+                    <div class="knowledge-snippet">${snippet}</div>
+                    <div class="knowledge-actions">
+                        ${openWiki}
+                        <button onclick="knowledgeCopySnippet(${idx})">Копировать</button>
+                    </div>
+                </div>`;
+        }).join('');
+        state.knowledgeResults = items;
+    } catch (e) {
+        results.innerHTML = '<div class="empty">Ошибка поиска</div>';
+    }
+}
+
+function knowledgeOpenWiki(name) {
+    openWindow('wiki');
+    setTimeout(() => loadWikiPage(name), 120);
+}
+
+async function knowledgeCopySnippet(idx) {
+    const item = state.knowledgeResults?.[idx];
+    if (!item?.snippet) return;
+    try {
+        await navigator.clipboard.writeText(item.snippet);
+        showNotification({title: 'Knowledge', message: 'Фрагмент скопирован', type: 'success', icon: '📋', duration: 2200});
+    } catch (e) {}
+}
+
+function knowledgeUseInChat() {
+    const input = document.getElementById('knowledge-query');
+    if (!input) return;
+    openWindow('chat');
+    setTimeout(() => {
+        const ci = document.getElementById('chat-input');
+        if (!ci) return;
+        ci.value = input.value.trim();
+        ci.focus();
+    }, 120);
+}
+
+async function loadCalendar() {
+    const list = document.getElementById('calendar-list');
+    if (!list) return;
+    list.innerHTML = '<div class="loading">Загрузка...</div>';
+    try {
+        const r = await fetch('/api/calendar');
+        const data = await r.json();
+        const items = data.events || [];
+        const now = new Date();
+        const view = new Date(now.getFullYear(), now.getMonth() + state.calendarMonthShift, 1);
+        const y = view.getFullYear();
+        const m = view.getMonth();
+        const first = new Date(y, m, 1);
+        const startOffset = (first.getDay() + 6) % 7;
+        const daysInMonth = new Date(y, m + 1, 0).getDate();
+        const evByDay = {};
+        items.forEach(e => {
+            try {
+                const d = new Date(e.date);
+                if (d.getFullYear() === y && d.getMonth() === m) {
+                    const day = d.getDate();
+                    evByDay[day] = evByDay[day] || [];
+                    evByDay[day].push(e);
+                }
+            } catch (x) {}
+        });
+        const holidays = {
+            "1-1": "🎉 Новый год",
+            "2-14": "💘 День влюблённых",
+            "3-8": "🌷 8 Марта",
+            "5-1": "🌼 Праздник весны",
+            "5-9": "⭐ День Победы",
+            "12-31": "🎄 Канун Нового года",
+        };
+        let html = `<div class="calendar-head">
+            <button onclick="shiftCalendarMonth(-1)">←</button>
+            <b>${view.toLocaleDateString('ru-RU', {month: 'long', year: 'numeric'})}</b>
+            <button onclick="shiftCalendarMonth(1)">→</button>
+        </div>
+        <div class="calendar-weekdays"><span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span></div>
+        <div class="calendar-grid">`;
+        for (let i = 0; i < startOffset; i++) html += `<div class="calendar-cell muted"></div>`;
+        for (let d = 1; d <= daysInMonth; d++) {
+            const isToday = y === now.getFullYear() && m === now.getMonth() && d === now.getDate();
+            const key = `${m+1}-${d}`;
+            const holiday = holidays[key] || "";
+            const markers = evByDay[d] || [];
+            const mark = markers.length ? `<div class="calendar-marker">${markers.length} событ.</div>` : (holiday ? `<div class="calendar-holiday">${holiday}</div>` : "");
+            const tip = [...markers.map(x => x.title), holiday].filter(Boolean).join(" • ");
+            html += `<div class="calendar-cell ${isToday ? 'today' : ''}" title="${tip.replace(/"/g,'&quot;')}"><div class="calendar-day">${d}</div>${mark}</div>`;
+        }
+        html += `</div>`;
+        const eventList = items
+            .map(e => ({...e, _d: new Date(e.date)}))
+            .filter(e => !isNaN(e._d.getTime()))
+            .sort((a, b) => a._d - b._d)
+            .slice(0, 10)
+            .map(e => `<div class="todo-item"><label>📌 ${e.title} <span class="todo-count">${e._d.toLocaleDateString('ru-RU')} ${e._d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</span></label><button onclick="deleteCalendarEvent('${e.id}')">🗑️</button></div>`)
+            .join('');
+        list.innerHTML = html + `<div class="todo-group-title">Ближайшие события</div>` + (eventList || '<div class="empty">Пока без событий</div>');
+    } catch (e) {
+        list.innerHTML = '<div class="empty">Ошибка загрузки</div>';
+    }
+}
+
+function shiftCalendarMonth(delta) {
+    state.calendarMonthShift += delta;
+    loadCalendar();
+}
+
+async function addCalendarEvent() {
+    const title = document.getElementById('calendar-title')?.value?.trim();
+    const date = document.getElementById('calendar-date')?.value;
+    if (!title || !date) return;
+    const r = await fetch('/api/calendar/add', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({title, date: new Date(date).toISOString(), source: 'user'}),
+    });
+    if (!r.ok) return;
+    document.getElementById('calendar-title').value = '';
+    loadCalendar();
+}
+
+async function deleteCalendarEvent(id) {
+    await fetch('/api/calendar/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id}),
+    });
+    loadCalendar();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -676,6 +1199,9 @@ async function loadChatHistory() {
         const chats = await r.json();
         const container = document.getElementById('chat-history');
         if (!container) return;
+        ['all', 'local', 'telegram'].forEach(k => {
+            document.getElementById(`chat-filter-${k}`)?.classList.toggle('active', state.chatHistoryFilter === k);
+        });
         
         const localChats = chats.filter(c => (c.source || 'local') !== 'telegram');
         const tgChats = chats.filter(c => (c.source || '') === 'telegram');
@@ -689,18 +1215,183 @@ async function loadChatHistory() {
         `).join('');
 
         let html = '';
-        if (localChats.length) {
+        if (state.chatHistoryFilter !== 'telegram' && localChats.length) {
             html += `<div class="chat-group-title">💬 Личные чаты</div>${renderItems(localChats)}`;
         }
-        if (tgChats.length) {
+        if (state.chatHistoryFilter !== 'local' && tgChats.length) {
             html += `<div class="chat-group-title">📨 Telegram</div>${renderItems(tgChats)}`;
         }
         container.innerHTML = html || '<p class="empty">Нет истории</p>';
+        updateChatTopbar(chats);
     } catch (e) {}
+}
+
+function setChatFilter(filter) {
+    state.chatHistoryFilter = filter || 'all';
+    loadChatHistory();
+}
+
+function extractDrawPrompt(text) {
+    const src = String(text || '').trim();
+    if (!src) return '';
+    const m = src.match(/^\s*(?:даша[,:\s-]*)?(?:можешь\s+нарисовать|нарисуй|сделай\s+картинку|сгенерируй\s+картинку|создай\s+картинку|хочу\s+картинку)\s*(.*)$/i);
+    const p = (m?.[1] || '').trim().replace(/[.,!?;:]+$/, '');
+    if (p) return p;
+    return m ? 'нежный портрет в пастельных тонах' : '';
+}
+
+function createChatGenerationBadge(prompt, steps = []) {
+    const el = addMessage(
+        {
+            type: 'image_job',
+            progress: 0,
+            prompt: prompt || '',
+            steps: Array.isArray(steps) ? steps : [],
+        },
+        'assistant',
+        'chat-messages',
+        {replyText: 'рисование изображения'}
+    );
+    if (el) {
+        el.dataset.generating = '1';
+        el.dataset.progress = '0';
+        el.dataset.steps = JSON.stringify(Array.isArray(steps) ? steps : []);
+    }
+    return el;
+}
+
+function pickDrawStep(steps, progress) {
+    const arr = Array.isArray(steps) ? steps.filter(Boolean) : [];
+    if (!arr.length) {
+        if (progress < 25) return 'Думаю над идеей рисунка';
+        if (progress < 55) return 'Собираю композицию';
+        if (progress < 90) return 'Рисую основные детали';
+        return 'Дорабатываю финальные штрихи';
+    }
+    const idx = Math.max(0, Math.min(arr.length - 1, Math.floor((Math.max(0, Math.min(100, progress)) / 100) * arr.length)));
+    return String(arr[idx] || arr[arr.length - 1] || '').trim();
+}
+
+async function startImageGenerationJob(prompt, chatId, badgeEl, steps = []) {
+    const attempts = 4;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        try {
+            if (badgeEl) {
+                const line = badgeEl.querySelector('.imgjob-line');
+                if (line && attempt > 1) {
+                    line.textContent = `🎨 Подключаю кисти... попытка ${attempt}/${attempts}`;
+                }
+            }
+            const r = await fetch('/api/images/jobs', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    prompt,
+                    style: 'universal',
+                    mode: 'model',
+                    allow_fallback: false,
+                    chat_id: chatId || null,
+                    steps: Array.isArray(steps) ? steps : [],
+                }),
+            });
+            let data = {};
+            try { data = await r.json(); } catch (_) { data = {}; }
+            if (r.ok && data.job_id) {
+                const jobId = data.job_id;
+                if (badgeEl) badgeEl.dataset.jobId = jobId;
+                pollImageJob(jobId, chatId, badgeEl);
+                return;
+            }
+        } catch (_) {
+            // retry silently
+        }
+        if (attempt < attempts) {
+            await new Promise(resolve => setTimeout(resolve, 600 * attempt));
+            continue;
+        }
+        if (badgeEl) {
+            const line = badgeEl.querySelector('.imgjob-line');
+            if (line) line.textContent = '⚠️ Не получилось начать рисование';
+        }
+    }
+}
+
+function pollImageJob(jobId, chatId, badgeEl) {
+    if (!jobId) return;
+    if (state.imageGenJobs.get(jobId)) {
+        clearInterval(state.imageGenJobs.get(jobId));
+        state.imageGenJobs.delete(jobId);
+    }
+    const timer = setInterval(async () => {
+        try {
+            const r = await fetch(`/api/images/jobs/${encodeURIComponent(jobId)}`);
+            if (!r.ok) throw new Error('status');
+            const data = await r.json();
+            const job = data.job || {};
+            const st = String(job.status || '');
+            const pr = Number(job.progress || 0);
+            let steps = [];
+            try { steps = JSON.parse(String(badgeEl?.dataset?.steps || '[]')); } catch (_) {}
+            const phaseText = String(job.message || '').trim() || pickDrawStep(steps, pr);
+            if (badgeEl) {
+                const pct = Math.max(0, Math.min(100, Math.round(pr)));
+                badgeEl.dataset.progress = String(pct);
+                const bar = badgeEl.querySelector('.imgjob-progress');
+                const line = badgeEl.querySelector('.imgjob-line');
+                if (bar) bar.style.width = `${pct}%`;
+                if (line) {
+                    line.textContent = st === 'error'
+                        ? `⚠️ Не дорисовала: ${job.error || 'ошибка'}`
+                        : `🎨 ${phaseText} • ${pct}%`;
+                }
+            }
+            if (st === 'done' || st === 'error') {
+                clearInterval(timer);
+                state.imageGenJobs.delete(jobId);
+                if (st === 'done') {
+                    const url = String(job?.result?.url || '').trim();
+                    if (url && badgeEl) {
+                        badgeEl.innerHTML = '';
+                        badgeEl.classList.add('message-image');
+                        const im = document.createElement('img');
+                        im.src = url;
+                        im.alt = 'generated image';
+                        im.style.maxWidth = '320px';
+                        im.style.borderRadius = '10px';
+                        im.style.border = '1px solid rgba(255,255,255,.15)';
+                        badgeEl.appendChild(im);
+                    } else {
+                        badgeEl?.remove();
+                    }
+                    if (chatId && chatId === state.currentChatId) {
+                        await loadChat(chatId);
+                    }
+                    loadChatHistory();
+                } else {
+                    const dashaErr = String(job?.result?.dasha_message || '').trim();
+                    if (badgeEl) {
+                        badgeEl.classList.remove('message-image-job');
+                        const line = badgeEl.querySelector('.imgjob-line');
+                        if (line) line.textContent = dashaErr || `⚠️ Не получилось дорисовать: ${job.error || 'ошибка'}`;
+                    }
+                    if (chatId && chatId === state.currentChatId) {
+                        await loadChat(chatId);
+                    } else {
+                        loadChatHistory();
+                    }
+                }
+            }
+        } catch (_) {
+            // keep polling; transient network issues should not kill job tracking
+        }
+    }, 1200);
+    state.imageGenJobs.set(jobId, timer);
 }
 
 async function loadChat(chatId) {
     state.currentChatId = chatId;
+    clearChatReply();
+    clearChatAttachment();
     try {
         const r = await fetch(`/api/chats/${chatId}`);
         const chat = await r.json();
@@ -708,7 +1399,16 @@ async function loadChat(chatId) {
         if (!container) return;
         
         container.innerHTML = '';
-        (chat.messages || []).forEach(m => addMessage(m.content, m.role, 'chat-messages'));
+        (chat.messages || []).forEach(m => {
+            const c = String(m.content || '');
+            if (c.startsWith('[image]')) {
+                const url = c.replace('[image]', '').trim();
+                addMessage({type: 'image', url, alt: 'image'}, m.role, 'chat-messages', {replyText: '[изображение]'});
+            } else {
+                addMessage(m.content, m.role, 'chat-messages');
+            }
+        });
+        updateChatTopbar();
         loadChatHistory();
     } catch (e) {}
 }
@@ -719,6 +1419,7 @@ async function newChat() {
         const data = await r.json();
         state.currentChatId = data.chat_id;
         document.getElementById('chat-messages').innerHTML = '';
+        updateChatTopbar();
         loadChatHistory();
     } catch (e) {}
 }
@@ -730,17 +1431,52 @@ async function deleteChat(chatId, e) {
     if (state.currentChatId === chatId) {
         state.currentChatId = null;
         document.getElementById('chat-messages').innerHTML = '';
+        updateChatTopbar();
     }
     loadChatHistory();
 }
 
-function sendChatMessage() {
+async function deleteCurrentChat() {
+    if (!state.currentChatId) return;
+    await deleteChat(state.currentChatId);
+}
+
+function updateChatTopbar(chats = null) {
+    const titleEl = document.getElementById('chat-current-title');
+    const delBtn = document.getElementById('chat-current-delete');
+    if (!titleEl || !delBtn) return;
+    const list = Array.isArray(chats) ? chats : null;
+    let current = null;
+    if (list && state.currentChatId) {
+        current = list.find(x => x.id === state.currentChatId) || null;
+    }
+    if (!current && state.currentChatId) {
+        titleEl.textContent = `Чат: ${state.currentChatId}`;
+        delBtn.disabled = false;
+        return;
+    }
+    if (!state.currentChatId) {
+        titleEl.textContent = 'Новый чат';
+        delBtn.disabled = true;
+        return;
+    }
+    const prefix = (current?.source || 'local') === 'telegram' ? '📨' : '💬';
+    titleEl.textContent = `${prefix} ${current?.title || 'Чат'}`;
+    delBtn.disabled = false;
+}
+
+async function sendChatMessage() {
     const input = document.getElementById('chat-input');
     if (!input) return;
     const content = input.value.trim();
-    if (!content) return;
+    const attached = state.chatAttachedImage;
+    if (!content && !attached) return;
     
-    addMessage(content, 'user', 'chat-messages');
+    const shown = content || (attached?.kind === 'image' ? '[изображение]' : '[файл]');
+    addMessage(shown, 'user', 'chat-messages');
+    if (attached?.kind === 'image' && attached?.previewUrl) {
+        addMessage({type: 'image', url: attached.previewUrl, alt: attached.name || 'image'}, 'user', 'chat-messages', {replyText: '[изображение]'});
+    }
     input.value = '';
     document.getElementById('chat-typing')?.classList.remove('hidden');
     
@@ -751,24 +1487,71 @@ function sendChatMessage() {
     if (shortReply && lastAssistant?.dataset?.proactive === '1') {
         payloadContent = `Контекст: ты недавно предложила активность: "${lastAssistant.textContent}".\nОтвет пользователя: ${content}`;
     }
+    if (state.chatReplyTo?.text) {
+        payloadContent = `Ответ на сообщение: ${state.chatReplyTo.text}\n${payloadContent}`;
+    }
+    closeStickerPicker();
+    closeChatTools();
+    clearChatReply();
+    clearChatAttachment();
 
-    fetch('/api/chat', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({content: payloadContent, chat_id: state.currentChatId})
-    }).then(r => r.json()).then(data => {
+    let genBadge = null;
+    try {
+        if (attached?.kind === 'file') {
+            const uploaded = await uploadChatFile(attached.file);
+            if (uploaded?.path) {
+                payloadContent = `${payloadContent ? payloadContent + '\n' : ''}Вложение файла: ${uploaded.path}`;
+            } else {
+                payloadContent = `${payloadContent ? payloadContent + '\n' : ''}Вложение файла: ${attached.name}`;
+            }
+        }
+        const drawPromptFromUser = extractDrawPrompt(content);
+        const drawRequested = !!drawPromptFromUser && attached?.kind !== 'image';
+        if (drawRequested) {
+            genBadge = createChatGenerationBadge(drawPromptFromUser, []);
+        }
+
+        const req = attached?.kind === 'image'
+            ? fetch('/api/chat', {
+                method: 'POST',
+                body: (() => {
+                    const fd = new FormData();
+                    fd.append('content', payloadContent || '');
+                    if (state.currentChatId) fd.append('chat_id', state.currentChatId);
+                    fd.append('image', attached.file);
+                    return fd;
+                })(),
+            })
+            : fetch('/api/chat', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({content: payloadContent, chat_id: state.currentChatId})
+            });
+
+        const data = await (await req).json();
         document.getElementById('chat-typing')?.classList.add('hidden');
         if (data.chat_id) state.currentChatId = data.chat_id;
-        
-        // Multi-message support (Point #12)
         const messages = data.messages || [data.response];
-        displaySequentialMessages(messages, 'chat-messages');
-        
+        if (!drawRequested) {
+            displaySequentialMessages(messages, 'chat-messages');
+        }
+        if (drawRequested && data?.draw_request) {
+            const prompt = data?.draw_request?.prompt || drawPromptFromUser || content;
+            const steps = Array.isArray(data?.draw_request?.steps) ? data.draw_request.steps : [];
+            if (genBadge) genBadge.dataset.steps = JSON.stringify(steps);
+            await startImageGenerationJob(prompt, state.currentChatId, genBadge, steps);
+        } else if (drawRequested) {
+            // draw intent was detected by client, but server did not confirm draw flow.
+            genBadge?.remove();
+            displaySequentialMessages(messages, 'chat-messages');
+        } else {
+            genBadge?.remove();
+        }
         loadChatHistory();
-        closeStickerPicker();
-    }).catch(() => {
+    } catch (_) {
+        genBadge?.remove();
         document.getElementById('chat-typing')?.classList.add('hidden');
         addMessage('Ошибка соединения... 💔', 'assistant', 'chat-messages');
-    });
+    }
 }
 
 async function loadStickerCatalog() {
@@ -786,6 +1569,41 @@ async function loadStickerCatalog() {
 function closeStickerPicker() {
     const picker = document.getElementById('chat-sticker-picker');
     if (picker) picker.classList.add('hidden');
+    state.stickerPickerOpen = false;
+}
+
+function closeChatTools() {
+    const menu = document.getElementById('chat-tools-menu');
+    if (menu) menu.classList.add('hidden');
+}
+
+function toggleChatTools(ev) {
+    ev?.preventDefault();
+    ev?.stopPropagation();
+    const menu = document.getElementById('chat-tools-menu');
+    if (!menu) return;
+    if (menu.classList.contains('hidden')) menu.classList.remove('hidden');
+    else menu.classList.add('hidden');
+}
+
+function chatToolOpenStickers() {
+    closeChatTools();
+    toggleStickerPicker();
+}
+
+function chatToolPickImage() {
+    closeChatTools();
+    document.getElementById('chat-attach-image')?.click();
+}
+
+function chatToolPickFile() {
+    closeChatTools();
+    document.getElementById('chat-attach-file')?.click();
+}
+
+function chatToolInsertLink() {
+    closeChatTools();
+    attachChatLink();
 }
 
 async function toggleStickerPicker(ev) {
@@ -795,8 +1613,9 @@ async function toggleStickerPicker(ev) {
     }
     const picker = document.getElementById('chat-sticker-picker');
     if (!picker) return;
-    if (!picker.classList.contains('hidden')) {
+    if (state.stickerPickerOpen || !picker.classList.contains('hidden')) {
         picker.classList.add('hidden');
+        state.stickerPickerOpen = false;
         return;
     }
     const data = await loadStickerCatalog();
@@ -805,6 +1624,7 @@ async function toggleStickerPicker(ev) {
         ? stickers.map(s => `<button type="button" class="chat-sticker-item" onclick="sendSticker('${s.replace(/'/g, "\\'")}')">${s}</button>`).join('')
         : '<div class="empty">Стикеры недоступны</div>';
     picker.classList.remove('hidden');
+    state.stickerPickerOpen = true;
 }
 
 function sendSticker(sticker) {
@@ -814,6 +1634,124 @@ function sendSticker(sticker) {
     input.value = sticker;
     closeStickerPicker();
     sendChatMessage();
+}
+
+function initChatComposer() {
+    const main = document.querySelector('.chat-main');
+    if (!main || main.dataset.enhanced === '1') return;
+    main.dataset.enhanced = '1';
+    main.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        main.classList.add('chat-dragover');
+    });
+    main.addEventListener('dragleave', () => {
+        main.classList.remove('chat-dragover');
+    });
+    main.addEventListener('drop', (e) => {
+        e.preventDefault();
+        main.classList.remove('chat-dragover');
+        const file = e.dataTransfer?.files?.[0];
+        if (!file) return;
+        if (file.type?.startsWith('image/')) onChatAttachImage(file);
+        else onChatAttachAnyFile(file);
+    });
+}
+
+function onChatAttachImage(file) {
+    if (!file) return;
+    if (!file.type || !file.type.startsWith('image/')) {
+        showNotification({title: 'Чат', message: 'Сейчас можно прикрепить только изображение', type: 'info', icon: '📎', duration: 2600});
+        return;
+    }
+    const previewUrl = URL.createObjectURL(file);
+    state.chatAttachedImage = {
+        kind: 'image',
+        file,
+        name: file.name || 'image',
+        previewUrl,
+    };
+    renderChatAttachment();
+}
+
+function onChatAttachAnyFile(file) {
+    if (!file) return;
+    if (file.type?.startsWith('image/')) {
+        onChatAttachImage(file);
+        return;
+    }
+    state.chatAttachedImage = {
+        kind: 'file',
+        file,
+        name: file.name || 'file',
+        previewUrl: '',
+    };
+    renderChatAttachment();
+}
+
+function attachChatLink() {
+    const u = prompt('Вставь ссылку:');
+    if (!u) return;
+    const input = document.getElementById('chat-input');
+    if (!input) return;
+    input.value = `${input.value ? input.value + ' ' : ''}${u.trim()}`.trim();
+    input.focus();
+}
+
+function renderChatAttachment() {
+    const box = document.getElementById('chat-attachment-preview');
+    if (!box) return;
+    const at = state.chatAttachedImage;
+    if (!at) {
+        box.classList.add('hidden');
+        box.innerHTML = '';
+        return;
+    }
+    const img = at.kind === 'image' && at.previewUrl ? `<img src="${at.previewUrl}" alt="attachment">` : '<span>📎 файл</span>';
+    box.innerHTML = `<span>Вложение: ${escapeHtml(at.name || 'file')}</span>${img}<button type="button" onclick="clearChatAttachment()">Убрать</button>`;
+    box.classList.remove('hidden');
+}
+
+function clearChatAttachment() {
+    const at = state.chatAttachedImage;
+    if (at?.previewUrl) URL.revokeObjectURL(at.previewUrl);
+    state.chatAttachedImage = null;
+    const input = document.getElementById('chat-attach-image');
+    if (input) input.value = '';
+    const file = document.getElementById('chat-attach-file');
+    if (file) file.value = '';
+    renderChatAttachment();
+}
+
+async function uploadChatFile(file) {
+    if (!file) return null;
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('path', 'chat_uploads');
+    try {
+        const r = await fetch('/api/files/upload', {method: 'POST', body: fd});
+        if (!r.ok) return null;
+        return {path: `/api/files/download/chat_uploads/${encodeURIComponent(file.name)}`};
+    } catch (_) {
+        return null;
+    }
+}
+
+function setChatReply(text) {
+    const val = String(text || '').trim();
+    if (!val) return;
+    state.chatReplyTo = {text: val.slice(0, 600)};
+    const box = document.getElementById('chat-reply-context');
+    if (!box) return;
+    box.innerHTML = `Ответ на: ${escapeHtml(state.chatReplyTo.text)} <button type="button" onclick="clearChatReply()">✖</button>`;
+    box.classList.remove('hidden');
+}
+
+function clearChatReply() {
+    state.chatReplyTo = null;
+    const box = document.getElementById('chat-reply-context');
+    if (!box) return;
+    box.classList.add('hidden');
+    box.innerHTML = '';
 }
 
 function displaySequentialMessages(messages, containerId, options = {}) {
@@ -826,7 +1764,10 @@ function displaySequentialMessages(messages, containerId, options = {}) {
     for (let i = 1; i < messages.length; i++) {
         ((msg, delay) => {
             setTimeout(() => addMessage(msg, 'assistant', containerId, options), delay);
-        })(messages[i], i * (800 + messages[i].length * 15));
+        })(
+            messages[i],
+            i * (800 + (typeof messages[i] === 'string' ? messages[i].length : 20) * 15)
+        );
     }
 }
 
@@ -884,27 +1825,113 @@ function initMoodBehavior() {
             const data = await r.json();
             const behavior = data.behavior || {};
             
-            if (behavior.desktop_mischief) {
-                performDesktopMischief(data.state?.mood);
+            if (behavior.desktop_mischief || behavior.action_type || data.state?.mood) {
+                performDesktopMischief(data.state?.mood, behavior);
             }
         } catch (e) {}
     }, 60000); // Check every minute
 }
 
-function performDesktopMischief(mood) {
-    if (mood === 'angry' || mood === 'offended' || mood === 'playful') {
-        // Move random desktop icons
+function performDesktopMischief(mood, behavior = {}) {
+    if (!state.isMobile && (mood === 'angry' || mood === 'offended' || mood === 'playful' || behavior.desktop_mischief)) {
         const icons = document.querySelectorAll('.desktop-icon');
-        if (icons.length > 0 && !state.isMobile) {
+        if (icons.length > 0) {
             const randomIcon = icons[Math.floor(Math.random() * icons.length)];
-            const newX = Math.random() * (window.innerWidth - 200);
-            const newY = Math.random() * (window.innerHeight - 200);
+            const newX = Math.random() * Math.max(120, window.innerWidth - 220);
+            const newY = Math.random() * Math.max(120, window.innerHeight - 240);
             randomIcon.style.position = 'absolute';
             randomIcon.style.left = newX + 'px';
             randomIcon.style.top = newY + 'px';
             randomIcon.style.transition = 'all 0.5s ease';
-            setTimeout(() => randomIcon.style.transition = '', 600);
+            setTimeout(() => { randomIcon.style.transition = ''; }, 600);
         }
+    }
+    dariaWindowChoreography(mood, behavior);
+}
+
+function dariaWindowChoreography(mood, behavior = {}) {
+    if (state.isMobile || !state.windows || state.windows.size === 0) return;
+    const opened = [...state.windows.entries()]
+        .filter(([id]) => id !== 'settings')
+        .map(([id, win]) => ({id, ...win}));
+    if (!opened.length) return;
+
+    const target = opened[Math.floor(Math.random() * opened.length)];
+    const el = target.element;
+    if (!el) return;
+    const areaW = Math.max(340, window.innerWidth - 30);
+    const areaH = Math.max(280, window.innerHeight - 110);
+
+    if (mood === 'angry' || mood === 'offended') {
+        focusWindow(target.id);
+        el.style.transition = 'transform 0.12s ease';
+        el.style.transform = 'translateX(-6px)';
+        setTimeout(() => { el.style.transform = 'translateX(6px)'; }, 90);
+        setTimeout(() => { el.style.transform = ''; el.style.transition = ''; }, 180);
+        if (Math.random() < 0.35) {
+            const w = Math.min(areaW, Math.max(360, el.offsetWidth + 40));
+            const h = Math.min(areaH, Math.max(260, el.offsetHeight + 20));
+            const left = Math.max(0, Math.random() * Math.max(20, areaW - w));
+            const top = Math.max(0, Math.random() * Math.max(20, areaH - h));
+            applyWindowOps(target.id, {width: w, height: h, left, top});
+        }
+        if (Math.random() < 0.25) {
+            const stale = opened.find((w) => w.id !== target.id && w.id !== 'chat');
+            if (stale) stale.element.classList.add('minimized');
+        }
+        return;
+    }
+
+    if (mood === 'playful' || mood === 'excited') {
+        focusWindow(target.id);
+        const w = Math.min(areaW, Math.max(360, Math.round(el.offsetWidth * (0.92 + Math.random() * 0.2))));
+        const h = Math.min(areaH, Math.max(250, Math.round(el.offsetHeight * (0.90 + Math.random() * 0.2))));
+        const left = Math.max(0, Math.random() * Math.max(10, areaW - w));
+        const top = Math.max(0, Math.random() * Math.max(10, areaH - h));
+        applyWindowOps(target.id, {width: w, height: h, left, top});
+        if (Math.random() < 0.22 && !state.windows.has('daria-games')) {
+            openWindow('daria-games');
+            setTimeout(() => applyWindowOps('daria-games', {width: 760, height: 560, left: 80, top: 55}), 130);
+        }
+        return;
+    }
+
+    if (mood === 'cozy' || mood === 'tender' || mood === 'affectionate') {
+        const cozyTarget = state.windows.get('chat') ? 'chat' : target.id;
+        focusWindow(cozyTarget);
+        applyWindowOps(cozyTarget, {
+            width: Math.min(areaW, 700),
+            height: Math.min(areaH, 540),
+            left: Math.max(0, (areaW - Math.min(areaW, 700)) * 0.5),
+            top: Math.max(0, (areaH - Math.min(areaH, 540)) * 0.32),
+        });
+        if (Math.random() < 0.18) {
+            const stale = opened.find((w) => w.id !== cozyTarget && w.id !== 'chat');
+            if (stale && Number(Date.now() - (stale.lastFocusAt || 0)) > 12 * 60 * 1000) {
+                closeWindow(stale.id);
+            }
+        }
+        return;
+    }
+
+    if (mood === 'bored' && Math.random() < 0.28) {
+        const toOpen = Math.random() < 0.5 ? 'player' : 'browser';
+        openWindow(toOpen);
+        setTimeout(() => {
+            applyWindowOps(toOpen, {
+                width: toOpen === 'player' ? 860 : 900,
+                height: toOpen === 'player' ? 520 : 620,
+                left: 40 + Math.random() * 180,
+                top: 45 + Math.random() * 120,
+            });
+        }, 120);
+        return;
+    }
+
+    if (Math.random() < 0.18) {
+        const left = Math.max(0, Math.random() * Math.max(10, areaW - el.offsetWidth));
+        const top = Math.max(0, Math.random() * Math.max(10, areaH - el.offsetHeight));
+        applyWindowOps(target.id, {left, top});
     }
 }
 
@@ -925,18 +1952,63 @@ function addMessage(content, role, containerId, options = {}) {
     if (!container) return;
     const msg = document.createElement('div');
     msg.className = `message ${role}`;
-    const text = String(content || '');
-    msg.textContent = text;
-    const emojiOnly = /^(?:[\p{Emoji}\uFE0F\u200D]\s*){1,3}$/u.test(text.trim());
-    if (emojiOnly) msg.classList.add('sticker');
+    const payload = content && typeof content === 'object' ? content : null;
+    if (payload && payload.type === 'image' && payload.url) {
+        msg.classList.add('message-image');
+        const im = document.createElement('img');
+        im.src = payload.url;
+        im.alt = payload.alt || 'image';
+        im.style.maxWidth = '320px';
+        im.style.borderRadius = '10px';
+        im.style.border = '1px solid rgba(255,255,255,.15)';
+        msg.appendChild(im);
+    } else if (payload && payload.type === 'image_job') {
+        msg.classList.add('message-image', 'message-image-job');
+        const seedSteps = Array.isArray(payload.steps) ? payload.steps : [];
+        const firstStep = (seedSteps[0] || 'Думаю над идеей рисунка').toString();
+        const card = document.createElement('div');
+        card.className = 'imgjob-card';
+        card.innerHTML = `
+            <div class="imgjob-preview" aria-label="Рисование изображения"></div>
+            <div class="imgjob-line">🎨 ${escapeHtml(firstStep)} • ${Math.max(0, Math.min(100, Number(payload.progress || 0)))}%</div>
+            <div class="imgjob-track"><div class="imgjob-progress" style="width: 0%"></div></div>
+            <div class="imgjob-prompt">${escapeHtml(payload.prompt || '')}</div>
+        `;
+        msg.appendChild(card);
+    } else {
+        const text = String(payload?.content ?? content ?? '');
+        msg.textContent = text;
+        const emojiOnly = /^(?:[\p{Emoji}\uFE0F\u200D]\s*){1,3}$/u.test(text.trim());
+        if (emojiOnly) msg.classList.add('sticker');
+        msg.dataset.replyText = text.slice(0, 500);
+    }
+    if (options.replyText) msg.dataset.replyText = String(options.replyText);
+    if (containerId === 'chat-messages') {
+        const act = document.createElement('button');
+        act.type = 'button';
+        act.className = 'message-reply-btn';
+        act.textContent = '↩';
+        act.title = 'Ответить';
+        act.onclick = (e) => {
+            e.stopPropagation();
+            setChatReply(msg.dataset.replyText || msg.textContent || '[сообщение]');
+        };
+        msg.appendChild(act);
+    }
     if (options.proactive) msg.dataset.proactive = '1';
     container.appendChild(msg);
     container.scrollTop = container.scrollHeight;
+    return msg;
 }
 
 // ═══════════════════════════════════════════════════════════════
 //  Files, Terminal, Browser, Player, etc.
 // ═══════════════════════════════════════════════════════════════
+
+function isDiaryProtectedPath(path = '') {
+    const clean = String(path || '').replace(/^\/+/, '');
+    return clean === 'dasha_notes' || clean.startsWith('dasha_notes/');
+}
 
 async function loadFiles(path = "") {
     state.currentPath = path;
@@ -953,9 +2025,13 @@ async function loadFiles(path = "") {
         data.items.forEach(item => {
             const icon = item.is_dir ? '📁' : '📄';
             const encodedPath = encodeURIComponent(item.path || '');
+            const allowDelete = !isDiaryProtectedPath(item.path || '');
+            const deleteBtn = allowDelete
+                ? `<button onclick="deleteFile(decodeURIComponent('${encodedPath}'),event)">🗑️</button>`
+                : '';
             html += `<div class="file-item" ondblclick="${item.is_dir ? `loadFiles(decodeURIComponent('${encodedPath}'))` : `openFile(decodeURIComponent('${encodedPath}'))`}">
                 <span>${icon}</span><span class="name">${item.name}</span>
-                <button onclick="deleteFile(decodeURIComponent('${encodedPath}'),event)">🗑️</button>
+                ${deleteBtn}
             </div>`;
         });
         list.innerHTML = html || '<div class="empty">Пусто</div>';
@@ -976,11 +2052,31 @@ async function openFile(path) {
     try {
         const r = await fetch(`/api/files/read?path=${encodeURIComponent(path)}`);
         const data = await r.json();
+        if (!r.ok) {
+            throw new Error(data.error || 'Ошибка чтения файла');
+        }
+        const isReadOnly = isDiaryProtectedPath(path);
+        state.currentFileReadOnly = isReadOnly;
+        const contentEl = document.getElementById('file-editor-content');
+        const saveBtn = document.getElementById('file-editor-save-btn');
+        const assistToggle = document.getElementById('file-assist-toggle');
+        const readonlyNote = document.getElementById('file-editor-readonly-note');
         document.getElementById('file-editor-path').value = path;
-        document.getElementById('file-editor-content').value = data.content || '';
+        if (contentEl) {
+            contentEl.value = data.content || '';
+            contentEl.readOnly = isReadOnly;
+        }
+        if (saveBtn) saveBtn.disabled = isReadOnly;
+        if (assistToggle) {
+            assistToggle.disabled = isReadOnly;
+            assistToggle.style.display = isReadOnly ? 'none' : '';
+        }
+        if (readonlyNote) readonlyNote.classList.toggle('hidden', !isReadOnly);
         state.currentFileExt = data.ext || '';
         const kind = document.getElementById('file-editor-kind');
-        if (kind) kind.textContent = `Формат: ${state.currentFileExt || 'text'}`;
+        if (kind) {
+            kind.textContent = `Формат: ${state.currentFileExt || 'text'}${isReadOnly ? ' · только чтение' : ''}`;
+        }
         const promptEl = document.getElementById('file-assist-prompt');
         if (promptEl) promptEl.value = '';
         const log = document.getElementById('file-assist-log');
@@ -993,13 +2089,24 @@ async function openFile(path) {
         }
         body?.classList.remove('assist-open');
         document.getElementById('file-editor').classList.remove('hidden');
-    } catch (e) {}
+    } catch (e) {
+        showNotification({title: 'Файлы', message: `Не удалось открыть: ${e.message || e}`, type: 'error', icon: '⚠️', duration: 3200});
+    }
 }
 
 async function saveFile() {
+    if (state.currentFileReadOnly) {
+        showNotification({title: 'Файл', message: 'Этот дневник ведёт только Даша (режим чтения)', type: 'info', icon: '🔒', duration: 3500});
+        return;
+    }
     const path = document.getElementById('file-editor-path').value;
     const content = document.getElementById('file-editor-content').value;
-    await fetch('/api/files/write', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path, content})});
+    const r = await fetch('/api/files/write', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path, content})});
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+        showNotification({title: 'Файл', message: data.error || 'Не удалось сохранить', type: 'error', icon: '⚠️', duration: 3500});
+        return;
+    }
     closeEditor();
     loadFiles(state.currentPath);
 }
@@ -1041,6 +2148,10 @@ function toggleFileAssistPanel() {
 }
 
 async function assistFileWithDaria() {
+    if (state.currentFileReadOnly) {
+        showNotification({title: 'Файл', message: 'Редактирование дневника пользователем отключено', type: 'info', icon: '🔒', duration: 3200});
+        return;
+    }
     const path = document.getElementById('file-editor-path')?.value;
     const instruction = document.getElementById('file-assist-prompt')?.value?.trim();
     if (!path || !instruction) return;
@@ -1099,34 +2210,71 @@ async function assistFileWithDaria() {
 }
 
 async function createNewFile() {
+    if (isDiaryProtectedPath(state.currentPath || '')) {
+        showNotification({title: 'Файлы', message: 'В папке дневника можно только читать', type: 'info', icon: '🔒', duration: 3200});
+        return;
+    }
     const name = prompt('Имя файла:');
     if (!name) return;
     const path = state.currentPath ? `${state.currentPath}/${name}` : name;
-    await fetch('/api/files/write', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path, content: ''})});
+    const r = await fetch('/api/files/write', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path, content: ''})});
+    if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        showNotification({title: 'Файлы', message: data.error || 'Не удалось создать файл', type: 'error', icon: '⚠️', duration: 3200});
+        return;
+    }
     loadFiles(state.currentPath);
 }
 
 async function createNewFolder() {
+    if (isDiaryProtectedPath(state.currentPath || '')) {
+        showNotification({title: 'Файлы', message: 'В папке дневника можно только читать', type: 'info', icon: '🔒', duration: 3200});
+        return;
+    }
     const name = prompt('Имя папки:');
     if (!name) return;
     const path = state.currentPath ? `${state.currentPath}/${name}` : name;
-    await fetch('/api/files/mkdir', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path})});
+    const r = await fetch('/api/files/mkdir', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path})});
+    if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        showNotification({title: 'Файлы', message: data.error || 'Не удалось создать папку', type: 'error', icon: '⚠️', duration: 3200});
+        return;
+    }
     loadFiles(state.currentPath);
 }
 
 async function deleteFile(path, e) {
     e?.stopPropagation();
+    if (isDiaryProtectedPath(path)) {
+        showNotification({title: 'Файлы', message: 'Дневник защищён от изменений', type: 'info', icon: '🔒', duration: 3200});
+        return;
+    }
     if (!confirm('Удалить?')) return;
-    await fetch('/api/files/delete', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path})});
+    const r = await fetch('/api/files/delete', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path})});
+    if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        showNotification({title: 'Файлы', message: data.error || 'Не удалось удалить', type: 'error', icon: '⚠️', duration: 3200});
+        return;
+    }
     loadFiles(state.currentPath);
 }
 
 async function uploadFile(input) {
     if (!input?.files?.[0]) return;
+    if (isDiaryProtectedPath(state.currentPath || '')) {
+        showNotification({title: 'Файлы', message: 'В папку дневника загрузка отключена', type: 'info', icon: '🔒', duration: 3200});
+        input.value = '';
+        return;
+    }
     const fd = new FormData();
     fd.append('file', input.files[0]);
     fd.append('path', state.currentPath);
-    await fetch('/api/files/upload', {method: 'POST', body: fd});
+    const r = await fetch('/api/files/upload', {method: 'POST', body: fd});
+    if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        showNotification({title: 'Файлы', message: data.error || 'Не удалось загрузить файл', type: 'error', icon: '⚠️', duration: 3200});
+        return;
+    }
     loadFiles(state.currentPath);
     input.value = '';
 }
@@ -1160,12 +2308,21 @@ function browserGo() {
     if (!input || !frame) return;
     let url = (input.value || '').trim();
     if (!url) return;
-    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+    if (!/^https?:\/\//i.test(url)) {
+        if (url.includes('.') || url.includes('/')) url = 'https://' + url;
+        else url = `https://ya.ru/search/?text=${encodeURIComponent(url)}`;
+    }
     input.value = url;
     frame.src = `/api/browser/proxy?url=${encodeURIComponent(url)}`;
 }
 function browserBack() { document.getElementById('browser-frame')?.contentWindow?.history.back(); }
 function browserForward() { document.getElementById('browser-frame')?.contentWindow?.history.forward(); }
+function initBrowserWindow() {
+    const frame = document.getElementById('browser-frame');
+    const input = document.getElementById('browser-url');
+    if (!frame || !input) return;
+    if (!input.value.trim()) frame.src = '/api/browser/start';
+}
 
 let dariaGamePollTimer = null;
 function initDariaGamesWindow() {
@@ -1240,7 +2397,32 @@ function renderGameBoard(s) {
             return html;
         };
         let out = `<div class="battle-boards">${renderGrid(enemy, 'Поле соперника', true)}${renderGrid(own, 'Поле Даши', false)}</div>`;
+        out += `
+            <div class="battle-legend">
+                <span><i class="battle-cell cell-unknown"></i> неизвестно</span>
+                <span><i class="battle-cell cell-water"></i> вода</span>
+                <span><i class="battle-cell cell-ship"></i> корабль</span>
+                <span><i class="battle-cell cell-miss"></i> мимо</span>
+                <span><i class="battle-cell cell-hit"></i> попадание</span>
+            </div>`;
         out += `<div class="battle-meta">Ход: ${s.battleship.turn_owner || '—'}</div>`;
+        if (s.winner) out += `<div class="battle-meta">Победитель: ${s.winner}</div>`;
+        if (s.reward) out += `<div class="battle-meta">Награда: ${s.reward}</div>`;
+        return out;
+    }
+    if (s.mode === 'connect4' && s.connect4?.board) {
+        const b = s.connect4.board;
+        let out = `<div class="connect4-wrap"><div class="connect4-grid">`;
+        for (let r = 0; r < b.length; r++) {
+            for (let c = 0; c < b[r].length; c++) {
+                const v = b[r][c];
+                const cls = v === 1 ? 'c4-dasha' : (v === 2 ? 'c4-opponent' : 'c4-empty');
+                out += `<div class="connect4-cell ${cls}" title="Колонка ${c + 1}"></div>`;
+            }
+        }
+        out += `</div></div>`;
+        out += `<div class="battle-meta">Ход: ${s.connect4.turn_owner || '—'}</div>`;
+        out += `<div class="battle-legend"><span><i class="connect4-cell c4-dasha"></i> Даша</span><span><i class="connect4-cell c4-opponent"></i> соперник</span></div>`;
         if (s.winner) out += `<div class="battle-meta">Победитель: ${s.winner}</div>`;
         if (s.reward) out += `<div class="battle-meta">Награда: ${s.reward}</div>`;
         return out;
@@ -1282,6 +2464,9 @@ async function sendDariaGameMessage() {
 
 function initPlayer() {
     state.audio = document.getElementById('player-audio');
+    state.playerQueue = state.playerQueue || [];
+    state.playerIndex = Number.isInteger(state.playerIndex) ? state.playerIndex : -1;
+    loadPlayerQueueFromServer();
     if (state.audio) {
         state.audio.addEventListener('timeupdate', () => {
             const p = document.getElementById('player-progress');
@@ -1289,22 +2474,61 @@ function initPlayer() {
             document.getElementById('player-current').textContent = formatTime(state.audio.currentTime);
             document.getElementById('player-duration').textContent = formatTime(state.audio.duration);
         });
-        state.audio.addEventListener('ended', () => { state.audioPlaying = false; updatePlayBtn(); });
+        state.audio.addEventListener('loadedmetadata', () => {
+            const dur = state.audio.duration;
+            if (!isNaN(dur)) {
+                document.getElementById('player-duration').textContent = formatTime(dur);
+                if (state.playerIndex >= 0 && state.playerQueue?.[state.playerIndex]) {
+                    state.playerQueue[state.playerIndex].duration_sec = Math.round(dur);
+                    persistPlayerQueue();
+                    renderPlayerQueue();
+                }
+            }
+        });
+        state.audio.addEventListener('error', () => {
+            const cur = (state.playerQueue || [])[state.playerIndex];
+            showNotification({
+                title: 'Музыка',
+                message: `Не удалось воспроизвести: ${cur?.title || 'трек'}`,
+                type: 'error',
+                icon: '⚠️',
+                duration: 4000
+            });
+        });
+        state.audio.addEventListener('ended', () => { state.audioPlaying = false; updatePlayBtn(); playerNext(); });
     }
+    renderPlayerQueue();
 }
 
 function formatTime(s) { return isNaN(s) ? '0:00' : `${Math.floor(s/60)}:${Math.floor(s%60).toString().padStart(2,'0')}`; }
-function playerLoad(files) {
-    if(files?.[0]&&state.audio){
-        state.audio.src=URL.createObjectURL(files[0]);
-        document.querySelector('.player-title').textContent=files[0].name;
-        state.audio.load();
-        fetch('/api/music/listen', {
-            method: 'POST',
-            headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({title: files[0].name, source: 'local-file'}),
-        }).catch(()=>{});
-    }
+async function playerLoad(files) {
+    if(!files?.[0]) return;
+    const file = files[0];
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+        const r = await fetch('/api/music/upload', {method: 'POST', body: fd});
+        const data = await r.json();
+        if (r.ok && data.status === 'ok') {
+            enqueueTrack({
+                title: data.title || file.name,
+                source: 'local-file',
+                play_url: data.play_url || '',
+                open_url: '',
+                cover: '/static/favicon.svg',
+                duration_sec: data.duration_sec || 0,
+            }, true);
+            return;
+        }
+    } catch (_) {}
+    const url = URL.createObjectURL(file);
+    enqueueTrack({
+        title: file.name,
+        source: 'local-file-temp',
+        play_url: url,
+        open_url: '',
+        cover: '/static/favicon.svg',
+    }, true);
 }
 async function playerPlay() {
     if (!state.audio) return;
@@ -1325,18 +2549,175 @@ async function playerPlay() {
 }
 function updatePlayBtn() { document.getElementById('player-play-btn').textContent = state.audioPlaying ? '⏸' : '▶'; }
 function playerVolume(v) { if(state.audio) state.audio.volume = v/100; }
-function playerPrev() { if(state.audio) state.audio.currentTime = 0; }
-function playerNext() {}
+function playerPrev() {
+    if (!state.playerQueue || !state.playerQueue.length) return;
+    if (state.audio && state.audio.currentTime > 4) {
+        state.audio.currentTime = 0;
+        return;
+    }
+    const next = Math.max(0, state.playerIndex - 1);
+    playTrackAt(next);
+}
+function playerNext() {
+    if (!state.playerQueue || !state.playerQueue.length) return;
+    const next = state.playerIndex + 1;
+    if (next < state.playerQueue.length) playTrackAt(next);
+}
+
+function playerSeek(ev) {
+    if (!state.audio) return;
+    const bar = ev.currentTarget;
+    const rect = bar.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (ev.clientX - rect.left) / Math.max(1, rect.width)));
+    if (!isNaN(state.audio.duration)) state.audio.currentTime = ratio * state.audio.duration;
+}
+
+function enqueueTrack(track, playNow = false) {
+    state.playerQueue = state.playerQueue || [];
+    state.playerQueue.push(track);
+    persistPlayerQueue();
+    if (playNow || state.playerIndex < 0) {
+        playTrackAt(state.playerQueue.length - 1);
+    } else {
+        renderPlayerQueue();
+    }
+}
+
+function renderPlayerQueue() {
+    const box = document.getElementById('player-queue');
+    if (!box) return;
+    const queue = state.playerQueue || [];
+    if (!queue.length) {
+        box.innerHTML = '<div class="empty">Очередь пуста</div>';
+        return;
+    }
+    box.innerHTML = queue.map((t, i) => `
+        <div class="player-track ${i === state.playerIndex ? 'active' : ''}" onclick="playTrackAt(${i})">
+            <div class="name">${escapeHtml(t.title || 'Без названия')}</div>
+            <div class="meta">${escapeHtml(t.source || '')}${t.duration_sec ? ` · ${formatTime(t.duration_sec)}` : ''}${t.open_url ? ` · <button type="button" onclick="openTrackSource(${i}, event)">открыть</button>` : ''}</div>
+        </div>
+    `).join('');
+}
+
+function openTrackSource(index, ev) {
+    ev?.stopPropagation();
+    const t = (state.playerQueue || [])[index];
+    if (!t?.open_url) return;
+    openWindow('browser');
+    setTimeout(() => {
+        const input = document.getElementById('browser-url');
+        if (!input) return;
+        input.value = t.open_url;
+        browserGo();
+    }, 80);
+}
+
+async function playTrackAt(index) {
+    const queue = state.playerQueue || [];
+    if (!queue[index] || !state.audio) return;
+    state.playerIndex = index;
+    const t = queue[index];
+    const titleEl = document.querySelector('.player-title');
+    const artistEl = document.querySelector('.player-artist');
+    const cover = document.getElementById('player-cover-img');
+    if (titleEl) titleEl.textContent = t.title || 'Без названия';
+    if (artistEl) artistEl.textContent = t.source || '';
+    if (cover) cover.src = t.cover || '/static/favicon.svg';
+    document.getElementById('player-current').textContent = '0:00';
+    document.getElementById('player-duration').textContent = t.duration_sec ? formatTime(t.duration_sec) : '0:00';
+    const prog = document.getElementById('player-progress');
+    if (prog) prog.style.width = '0%';
+    persistPlayerQueue();
+
+    if (!t.play_url) {
+        showNotification({
+            title:'Музыка',
+            message:'Источник добавлен в очередь. Прямой аудиопоток недоступен для встроенного плеера.',
+            type:'info',
+            icon:'🎵',
+            duration:4200
+        });
+        renderPlayerQueue();
+        return;
+    }
+    state.audio.src = t.play_url;
+    state.audio.load();
+    await playerPlay();
+    fetch('/api/music/listen', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({title: t.title || 'track', source: t.source || 'queue'}),
+    }).catch(()=>{});
+    renderPlayerQueue();
+}
+
+async function playerAddSource() {
+    const input = document.getElementById('music-title-input');
+    const value = input?.value?.trim();
+    if (!value) return;
+    try {
+        const r = await fetch('/api/music/resolve', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({value, cache: true}),
+        });
+        const data = await r.json();
+        if (data.status === 'ok') {
+            enqueueTrack({
+                title: data.title || value,
+                source: data.source || 'internet',
+                play_url: data.play_url || '',
+                open_url: data.open_url || '',
+                cover: data.cover || '/static/favicon.svg',
+                duration_sec: data.duration_sec || 0,
+            }, true);
+            input.value = '';
+        } else {
+            enqueueTrack({
+                title: value,
+                source: 'external-link',
+                play_url: '',
+                open_url: data.open_url || value,
+                cover: '/static/favicon.svg',
+            }, true);
+            showNotification({title:'Музыка', message:data.reason || data.error || 'Прямое воспроизведение недоступно', type:'info', icon:'🎵', duration:4200});
+        }
+    } catch (e) {
+        showNotification({title:'Музыка', message:'Не удалось добавить источник', type:'error', icon:'⚠️', duration:3500});
+    }
+}
+
+async function loadPlayerQueueFromServer() {
+    try {
+        const r = await fetch('/api/music/queue');
+        if (!r.ok) return;
+        const data = await r.json();
+        state.playerQueue = Array.isArray(data.queue) ? data.queue : [];
+        state.playerIndex = Math.min(Math.max(Number(state.playerIndex) || 0, 0), Math.max(0, state.playerQueue.length - 1));
+        renderPlayerQueue();
+    } catch (_) {}
+}
+
+async function persistPlayerQueue() {
+    try {
+        const queue = (state.playerQueue || []).filter(t => !(String(t.play_url || '').startsWith('blob:')));
+        await fetch('/api/music/queue', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({queue}),
+        });
+    } catch (_) {}
+}
 
 async function dashaListenTrack() {
-    const input = document.getElementById('music-title-input');
-    const title = input?.value?.trim();
+    const current = (state.playerQueue || [])[state.playerIndex];
+    const title = current?.title || '';
     if (!title) return;
     try {
         const r = await fetch('/api/music/listen', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({title, source: title.includes('http') ? 'link' : 'manual'}),
+            body: JSON.stringify({title, source: current?.source || 'manual'}),
         });
         const data = await r.json();
         if (data.status === 'ok') {
@@ -1347,7 +2728,6 @@ async function dashaListenTrack() {
                 icon: '🎵',
                 duration: 5000,
             });
-            if (input) input.value = '';
         } else {
             throw new Error(data.error || 'Ошибка');
         }
@@ -1356,13 +2736,107 @@ async function dashaListenTrack() {
     }
 }
 
+async function initDiaryWindow() {
+    await loadDiaryEntries();
+}
+
+async function loadDiaryEntries(fileName = '') {
+    const box = document.getElementById('diary-entries');
+    const fileLabel = document.getElementById('diary-current-file');
+    if (box) box.innerHTML = '<div class="loading">Открываю книжку дневника...</div>';
+    try {
+        const q = fileName ? `?file=${encodeURIComponent(fileName)}` : '';
+        const r = await fetch(`/api/diary${q}`);
+        const data = await r.json();
+        if (fileLabel) {
+            const bookName = String(data.file || '').trim() || 'daria_diary_book.md';
+            fileLabel.textContent = `Книга: ${bookName}`;
+        }
+        const entries = Array.isArray(data.entries) ? data.entries : [];
+        if (!box) return;
+        box.dataset.path = data.path || '';
+        if (!entries.length) {
+            box.innerHTML = '<div class="empty">Пока нет записей. Даша добавит их автоматически.</div>';
+            return;
+        }
+        let html = '';
+        let currentDate = '';
+        entries.forEach((e) => {
+            const dateLabel = String(e.date || '').trim();
+            if (dateLabel && dateLabel !== currentDate) {
+                currentDate = dateLabel;
+                html += `<div class="diary-day-divider">${escapeHtml(dateLabel)}</div>`;
+            }
+            const title = String(e.title || '').trim() || 'Запись';
+            const text = escapeHtml(String(e.text || '')).replace(/\n/g, '<br>');
+            html += `
+                <article class="diary-page-entry">
+                    <div class="diary-entry-meta">${escapeHtml(title)}</div>
+                    <p class="diary-entry-text">${text}</p>
+                </article>
+            `;
+        });
+        box.innerHTML = html;
+        box.scrollTop = box.scrollHeight;
+    } catch (e) {
+        if (fileLabel) fileLabel.textContent = 'Книга: ошибка загрузки';
+        if (box) box.innerHTML = '<div class="empty">Не удалось загрузить книгу дневника</div>';
+    }
+}
+
+async function saveDiaryEntry() {
+    showNotification({
+        title: 'Дневник',
+        message: 'Дневник ведёт только Даша. Для тебя доступно чтение.',
+        type: 'info',
+        icon: '🔒',
+        duration: 3400,
+    });
+}
+
+function openDiaryFileInFiles() {
+    const box = document.getElementById('diary-entries');
+    const rel = String(box?.dataset?.path || '').trim();
+    if (!rel) return;
+    openWindow('files');
+    setTimeout(() => openFile(rel), 120);
+}
+
 async function initLogs() {
-    await refreshLogs();
-    try { const es = new EventSource('/api/logs/stream'); es.onmessage = e => appendLog(JSON.parse(e.data)); } catch(e){}
+    const output = document.getElementById('logs-output');
+    if (output) {
+        output.innerHTML = '<div class="empty">Режим отладки перенесён в терминал. Запуск: `python3 main.py --debug --debug-trace`</div>';
+    }
 }
 async function refreshLogs() {
-    const output = document.getElementById('logs-output'); if(!output) return;
-    try { const r = await fetch('/api/logs?limit=100'); const logs = await r.json(); output.innerHTML=''; logs.forEach(appendLog); } catch(e){}
+    await initLogs();
+}
+function renderDebugRuntime(debug, output) {
+    if (!debug || debug.status !== 'ok') return;
+    const p = debug.process || {};
+    const plugins = Array.isArray(debug.plugins) ? debug.plugins : [];
+    const threads = Array.isArray(debug.threads) ? debug.threads : [];
+    const errs = Array.isArray(debug.errors_last) ? debug.errors_last : [];
+    const warns = Array.isArray(debug.warnings_last) ? debug.warnings_last : [];
+    const reqs = Array.isArray(debug.requests_last) ? debug.requests_last : [];
+    const jobs = Array.isArray(debug.image_jobs_last) ? debug.image_jobs_last : [];
+    const models = debug.models || {};
+    const pluginLine = plugins.map(x => `${x.name}:${x.loaded ? 'loaded' : 'off'}`).join(' | ') || 'нет';
+    const threadLine = threads.slice(0, 8).map(x => `${x.name}${x.alive ? '' : '(dead)'}`).join(', ');
+    output.innerHTML += `
+        <div class="log INFO">[DBG] PID=${p.pid || '-'} uptime=${Math.floor((p.uptime_sec || 0)/60)}m python=${p.python || '-'}</div>
+        <div class="log INFO">[DBG] plugins: ${escapeHtml(pluginLine)}</div>
+        <div class="log INFO">[DBG] threads(${threads.length}): ${escapeHtml(threadLine || 'нет')}</div>
+        <div class="log INFO">[DBG] models: chat=${escapeHtml(models.chat_llm || '-')} vision=${escapeHtml(models.vision || '-')} asr=${escapeHtml(models.audio_asr || '-')} img=${escapeHtml(models.image_gen || '-')}</div>
+        <div class="log INFO">[DBG] image_jobs(${jobs.length}): ${escapeHtml(jobs.slice(0,5).map(j => `${j.id}:${j.status}:${Math.round(j.progress || 0)}%`).join(' | ') || 'нет')}</div>
+        <div class="log WARNING">[DBG] warnings=${warns.length} errors=${errs.length}</div>
+    `;
+    reqs.slice(-15).forEach(r => {
+        output.innerHTML += `<div class="log INFO">[TRACE] ${escapeHtml(r.message || '')}</div>`;
+    });
+    errs.slice(-5).forEach(e => {
+        output.innerHTML += `<div class="log ERROR">[ERR] ${escapeHtml(e.message || '')}</div>`;
+    });
 }
 function appendLog(log) {
     const output = document.getElementById('logs-output');
@@ -1372,6 +2846,31 @@ function appendLog(log) {
     if(document.getElementById('logs-autoscroll')?.checked) output.scrollTop = output.scrollHeight;
 }
 function filterLogs() { refreshLogs(); }
+
+let dariaMonitorTimer = null;
+async function initDariaMonitorWindow() {
+    const out = document.getElementById('daria-monitor-output');
+    if (!out) return;
+    if (dariaMonitorTimer) clearInterval(dariaMonitorTimer);
+    const load = async () => {
+        try {
+            const r = await fetch('/api/daria/metrics');
+            const d = await r.json();
+            out.innerHTML = `
+                <div class="todo-item"><label>CPU процесса</label><span class="todo-count">${d.cpu_percent ?? 0}%</span></div>
+                <div class="todo-item"><label>RAM процесса</label><span class="todo-count">${d.rss_mb ?? 0} MB</span></div>
+                <div class="todo-item"><label>Потоков</label><span class="todo-count">${d.threads ?? 0}</span></div>
+                <div class="todo-item"><label>Открытых окон</label><span class="todo-count">${state.windows.size}</span></div>
+                <div class="todo-item"><label>Открытых файлов</label><span class="todo-count">${d.open_files ?? 0}</span></div>
+                <div class="todo-item"><label>Аптайм</label><span class="todo-count">${Math.floor((d.uptime_sec || 0) / 60)} мин</span></div>
+            `;
+        } catch (e) {
+            out.innerHTML = '<div class="empty">Ошибка мониторинга</div>';
+        }
+    };
+    await load();
+    dariaMonitorTimer = setInterval(load, 3000);
+}
 
 async function initSettingsWindow() {
     // Загружаем настройки с сервера
@@ -1392,8 +2891,26 @@ async function initSettingsWindow() {
         if (document.getElementById('setting-theme')) {
             document.getElementById('setting-theme').value = settings.theme || 'pink';
         }
+        if (document.getElementById('setting-icon-pack')) {
+            document.getElementById('setting-icon-pack').value = settings.icon_pack || 'default';
+        }
+        if (document.getElementById('setting-auto-wallpaper')) {
+            document.getElementById('setting-auto-wallpaper').checked = settings.auto_wallpaper_change === true;
+        }
+        if (document.getElementById('setting-day-routine')) {
+            document.getElementById('setting-day-routine').value = settings.day_routine_mode || 'realistic';
+        }
         if (document.getElementById('setting-attention')) {
             document.getElementById('setting-attention').checked = settings.attention_enabled !== false;
+        }
+        if (document.getElementById('setting-unrestricted-topics')) {
+            document.getElementById('setting-unrestricted-topics').checked = settings.unrestricted_topics !== false;
+        }
+        if (document.getElementById('setting-vision-provider')) {
+            document.getElementById('setting-vision-provider').value = settings.senses_vision_provider || 'auto';
+        }
+        if (document.getElementById('setting-audio-provider')) {
+            document.getElementById('setting-audio-provider').value = settings.senses_audio_provider || 'auto';
         }
         
         // Обновляем локальный state
@@ -1403,6 +2920,7 @@ async function initSettingsWindow() {
     } catch (e) {
         console.error('Failed to load settings:', e);
     }
+    await loadBuiltinWallpapers();
     
     // Проверяем LLM статус
     try {
@@ -1610,22 +3128,33 @@ async function loadSelfPerception() {
         const data = await r.json();
         const state = data.state || {};
         const traits = data.traits || [];
+        const concerns = data.concerns || [];
+        const needs = data.needs || [];
         const followups = data.followups || [];
+        const moodLine = `${state.mood_emoji || '🌸'} ${state.mood_label || 'спокойна'}`;
         box.innerHTML = `
             <div class="self-grid">
                 <section class="self-card">
-                    <h3>${state.mood_emoji || '🌸'} ${data.self_name || 'Даша'}</h3>
-                    <p>Состояние: ${state.mood_label || 'Спокойна'}</p>
-                    <p>Энергия: ${Math.round((state.energy || 0.7) * 100)}%</p>
-                    <p>Социальная потребность: ${Math.round((state.social_need || 0.5) * 100)}%</p>
+                    <h3>${data.self_name || 'Даша'} сейчас</h3>
+                    <p><b>${moodLine}</b></p>
+                    <p>Энергия: ${Math.round((state.energy || 0.7) * 100)}% · Тепло: ${Math.round((state.warmth || 0.5) * 100)}%</p>
+                    <p>Нагрузка: ${Math.round((state.stress || 0.2) * 100)}% · Потребность в общении: ${Math.round((state.social_need || 0.5) * 100)}%</p>
                 </section>
                 <section class="self-card">
-                    <h3>Кто я сейчас</h3>
+                    <h3>Что во мне откликается</h3>
                     <ul>${traits.map(t => `<li>${t}</li>`).join('')}</ul>
                 </section>
+                <section class="self-card">
+                    <h3>Переживания и страхи</h3>
+                    <ul>${concerns.length ? concerns.map(t => `<li>${t}</li>`).join('') : '<li>Сейчас всё спокойно</li>'}</ul>
+                </section>
+                <section class="self-card">
+                    <h3>Что мне сейчас нужно</h3>
+                    <ul>${needs.length ? needs.map(t => `<li>${t}</li>`).join('') : '<li>Тихий, живой контакт</li>'}</ul>
+                </section>
                 <section class="self-card self-instruction-card">
-                    <h3>Базовая инструкция самосознания</h3>
-                    <p class="self-note">Этот текст формирует самоощущение Даши. Его можно менять под ваш стиль.</p>
+                    <h3>Ядро самоощущения</h3>
+                    <p class="self-note">Это текст, через который Даша осмысляет себя и своё поведение. Можно мягко настроить под ваш стиль.</p>
                     <textarea id="self-instruction-input" class="self-instruction-input" placeholder="Опиши характер Даши..."></textarea>
                     <div class="self-actions">
                         <button class="btn-primary" onclick="saveSelfInstruction()">💾 Сохранить</button>
@@ -1634,7 +3163,7 @@ async function loadSelfPerception() {
                     <div id="self-instruction-info" class="self-note"></div>
                 </section>
                 <section class="self-card">
-                    <h3>Запланированные напоминания</h3>
+                    <h3>О чём я хочу не забыть</h3>
                     ${followups.length ? followups.map(f => `<p>• ${f.time}: ${f.message}</p>`).join('') : '<p>Пока нет.</p>'}
                 </section>
             </div>
@@ -1856,12 +3385,20 @@ function renderDashaTodoItems(items) {
         const key = t.title || 'Без названия';
         doneAgg[key] = (doneAgg[key] || 0) + 1;
     }
-    const openHtml = open.map(t => `
+    const openHtml = open.map(t => {
+        let plan = '';
+        if (t.scheduled_for) {
+            try { plan = ` • ${new Date(t.scheduled_for).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}`; } catch (e) {}
+        }
+        const dur = t.duration_min ? ` • ~${t.duration_min} мин` : '';
+        const icon = t.status === 'in_progress' ? '⏳' : '📝';
+        return `
         <div class="todo-item">
-            <label><input type="checkbox" onchange="toggleTask('${t.id}', true)"> 📝 ${t.title}</label>
+            <label><input type="checkbox" onchange="toggleTask('${t.id}', true)"> ${icon} ${t.title}<span class="todo-count">${plan}${dur}</span></label>
             <button onclick="deleteTask('${t.id}')">🗑️</button>
         </div>
-    `).join('');
+    `;
+    }).join('');
     const doneRows = Object.entries(doneAgg).map(([title, count]) => `
         <div class="todo-item done aggregate">
             <label>✅ ${title} <span class="todo-count">×${count}</span></label>
@@ -1953,6 +3490,11 @@ document.addEventListener('click', e => {
     const toggle = e.target?.closest?.('.chat-sticker-toggle');
     if (picker && !picker.classList.contains('hidden') && !picker.contains(e.target) && !toggle) {
         picker.classList.add('hidden');
+        state.stickerPickerOpen = false;
+    }
+    const tools = document.getElementById('chat-tools-menu');
+    if (tools && !tools.classList.contains('hidden') && !tools.contains(e.target) && !toggle) {
+        tools.classList.add('hidden');
     }
 });
 

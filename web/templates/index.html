@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>DARIA v{{ version }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <link rel="stylesheet" href="/static/css/desktop.css">
 </head>
 <body>
@@ -37,17 +38,32 @@
     </div>
 
     <div id="start-menu" class="hidden">
-        <div class="start-header"><div class="start-avatar">🌸</div><div><div class="start-name">Дарья</div><div class="start-version">v{{ version }}</div></div></div>
+        <div class="start-header">
+            <div class="start-avatar-wrap">
+                <div class="start-avatar">🌸</div>
+            </div>
+            <div><div class="start-name">Дарья</div><div class="start-version">v{{ version }}</div></div>
+            <img id="start-user-avatar" class="start-user-avatar hidden" src="" alt="">
+        </div>
         <div class="start-items">
-            <div class="start-item" onclick="openWindow('chat');toggleStartMenu()"><span>💬</span>Чат</div>
-            <div class="start-item" onclick="openWindow('self');toggleStartMenu()"><span>🪞</span>Самоосознание</div>
+            <div class="start-group-title">Общение</div>
+            <div class="start-item" onclick="openWindow('chat');toggleStartMenu()"><span>💬</span>Разговор с Дашей</div>
+            <div class="start-item" onclick="openWindow('self');toggleStartMenu()"><span>🪞</span>Состояние Даши</div>
+            <div class="start-item" onclick="openWindow('senses');toggleStartMenu()"><span>👁️</span>Чувства и восприятие</div>
+            <div class="start-group-title">Организация</div>
             <div class="start-item" onclick="openWindow('todos');toggleStartMenu()"><span>✅</span>Списки дел</div>
-            <div class="start-item" onclick="openWindow('senses');toggleStartMenu()"><span>👁️</span>Сенсоры</div>
-            <div class="start-item" onclick="openWindow('wiki');toggleStartMenu()"><span>📚</span>Wiki</div>
-            <div class="start-item" onclick="openWindow('updater');toggleStartMenu()"><span>⬆️</span>Обновления</div>
+            <div class="start-item" onclick="openWindow('calendar');toggleStartMenu()"><span>📅</span>Календарь</div>
             <div class="start-item" onclick="openWindow('files');toggleStartMenu()"><span>📁</span>Файлы</div>
-            <div class="start-item" onclick="openWindow('daria-games');toggleStartMenu()"><span>🎮</span>Игры Даши</div>
-            <div class="start-item" onclick="openWindow('terminal');toggleStartMenu()"><span>💻</span>Терминал</div>
+            <div class="start-item" onclick="openWindow('diary');toggleStartMenu()"><span>📝</span>Дневник Даши</div>
+            <div class="start-item" onclick="openWindow('wiki');toggleStartMenu()"><span>📚</span>База знаний</div>
+            <div class="start-item" onclick="openWindow('knowledge');toggleStartMenu()"><span>📖</span>Инспектор знаний</div>
+            <div class="start-group-title">Развлечения</div>
+            <div class="start-item" onclick="openWindow('daria-games');toggleStartMenu()"><span>🎮</span>Игровой центр</div>
+            <div class="start-item" onclick="openWindow('player');toggleStartMenu()"><span>🎵</span>Музыка</div>
+            <div class="start-group-title">Система</div>
+            <div class="start-item" onclick="openWindow('updater');toggleStartMenu()"><span>⬆️</span>Обновления</div>
+            <div class="start-item" onclick="openWindow('terminal');toggleStartMenu()"><span>💻</span>Консоль</div>
+            <div class="start-item" onclick="openWindow('monitor');toggleStartMenu()"><span>📈</span>Монитор Даши</div>
             <div class="start-item" onclick="openWindow('store');toggleStartMenu()"><span>🛒</span>Магазин</div>
             <div class="start-item" onclick="openWindow('settings');toggleStartMenu()"><span>⚙️</span>Настройки</div>
             <div class="start-item" onclick="openWindow('support');toggleStartMenu()"><span>☕</span>Поддержать</div>
@@ -90,13 +106,32 @@
         <div class="chat-container">
             <div class="chat-sidebar">
                 <button class="new-chat-btn" onclick="newChat()">+ Новый чат</button>
+                <div class="chat-filter-tabs">
+                    <button id="chat-filter-all" onclick="setChatFilter('all')">Все</button>
+                    <button id="chat-filter-local" onclick="setChatFilter('local')">Личные</button>
+                    <button id="chat-filter-telegram" onclick="setChatFilter('telegram')">Telegram</button>
+                </div>
                 <div class="chat-history" id="chat-history"></div>
             </div>
             <div class="chat-main">
+                <div class="chat-topbar">
+                    <div id="chat-current-title">Новый чат</div>
+                    <button id="chat-current-delete" type="button" onclick="deleteCurrentChat()" disabled>Удалить чат</button>
+                </div>
                 <div class="chat-messages" id="chat-messages"></div>
                 <div class="chat-typing hidden" id="chat-typing">Дарья печатает<span class="dots">...</span></div>
+                <div id="chat-reply-context" class="chat-reply-context hidden"></div>
+                <div id="chat-attachment-preview" class="chat-attachment-preview hidden"></div>
                 <div class="chat-input-area">
-                    <button class="chat-sticker-toggle" title="Стикеры" onclick="toggleStickerPicker(event)">🩷</button>
+                    <button class="chat-sticker-toggle" title="Инструменты" onclick="toggleChatTools(event)">＋</button>
+                    <input id="chat-attach-image" type="file" accept="image/*" onchange="onChatAttachImage(this.files?.[0])" hidden>
+                    <input id="chat-attach-file" type="file" onchange="onChatAttachAnyFile(this.files?.[0])" hidden>
+                    <div id="chat-tools-menu" class="chat-tools-menu hidden">
+                        <button type="button" onclick="chatToolOpenStickers()">🩷 Стикер</button>
+                        <button type="button" onclick="chatToolPickImage()">🖼 Картинка</button>
+                        <button type="button" onclick="chatToolPickFile()">📎 Файл</button>
+                        <button type="button" onclick="chatToolInsertLink()">🔗 Ссылка</button>
+                    </div>
                     <div id="chat-sticker-picker" class="chat-sticker-picker hidden"></div>
                     <input type="text" id="chat-input" placeholder="Напиши сообщение..." onkeypress="if(event.key==='Enter')sendChatMessage()">
                     <button onclick="sendChatMessage()">➤</button>
@@ -119,15 +154,16 @@
             <div id="file-editor" class="file-editor hidden">
                 <div class="editor-header">
                     <input type="text" id="file-editor-path" readonly>
-                    <button onclick="saveFile()">💾</button>
+                    <button id="file-editor-save-btn" onclick="saveFile()">💾</button>
                     <button onclick="closeEditor()">✖</button>
                 </div>
                 <div class="editor-header">
                     <span id="file-editor-kind" class="editor-kind">Формат: text</span>
                 </div>
+                <div id="file-editor-readonly-note" class="small-note hidden">Этот файл только для чтения: дневник ведёт только Даша.</div>
                 <div class="editor-body">
                     <textarea id="file-editor-content"></textarea>
-                    <button class="file-assist-toggle" title="Редактировать с Дашей" onclick="toggleFileAssistPanel()">
+                    <button id="file-assist-toggle" class="file-assist-toggle" title="Редактировать с Дашей" onclick="toggleFileAssistPanel()">
                         <img src="/static/img/logo.png" alt="Dasha">
                     </button>
                     <div id="file-assist-panel" class="file-assist-panel hidden">
@@ -209,13 +245,36 @@
         </div>
     </template>
 
+    <template id="calendar-content">
+        <div class="settings-container">
+            <div class="settings-section">
+                <h3>📅 Важные даты</h3>
+                <div class="setting-row">
+                    <input id="calendar-title" type="text" placeholder="Название события">
+                    <input id="calendar-date" type="datetime-local">
+                    <button onclick="addCalendarEvent()">Добавить</button>
+                </div>
+                <div id="calendar-list" class="calendar-list"></div>
+            </div>
+        </div>
+    </template>
+
     <template id="terminal-content">
         <div class="terminal-container">
             <div class="terminal-output" id="terminal-output">
-                <div class="term-line">DARIA Terminal v0.8.6.4</div>
+                <div class="term-line">DARIA Terminal v0.9.0</div>
                 <div class="term-line">Введи help для команд</div>
             </div>
             <div class="terminal-input"><span>$</span><input type="text" id="terminal-input" onkeypress="if(event.key==='Enter')executeTerminal()"></div>
+        </div>
+    </template>
+
+    <template id="monitor-content">
+        <div class="settings-container">
+            <div class="settings-section">
+                <h3>📈 Нагрузка DARIA</h3>
+                <div id="daria-monitor-output" class="todo-list"><div class="loading">Загрузка...</div></div>
+            </div>
         </div>
     </template>
 
@@ -224,10 +283,10 @@
             <div class="browser-toolbar">
                 <button onclick="browserBack()">←</button>
                 <button onclick="browserForward()">→</button>
-                    <input type="text" id="browser-url" value="https://example.org" onkeypress="if(event.key==='Enter')browserGo()">
+                    <input type="text" id="browser-url" value="" placeholder="Введите URL или поисковый запрос" onkeypress="if(event.key==='Enter')browserGo()">
                 <button onclick="browserGo()">→</button>
             </div>
-            <iframe id="browser-frame"></iframe>
+            <iframe id="browser-frame" src="/api/browser/start"></iframe>
         </div>
     </template>
 
@@ -238,6 +297,7 @@
                     <option value="associations">Ассоциации</option>
                     <option value="battleship">Морской бой</option>
                     <option value="maze2d">2D Лабиринт</option>
+                    <option value="connect4">Четыре в ряд</option>
                 </select>
                 <select id="daria-game-opponent">
                     <option value="bot">Соперник: Бот</option>
@@ -249,6 +309,13 @@
             </div>
             <div class="daria-games-status" id="daria-game-status">Статус: ожидание</div>
             <div id="daria-game-board" class="daria-game-board"></div>
+            <div class="small-note" style="padding:8px 12px;">
+                <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#334155;"></span> неизвестно
+                <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#0ea5e9;margin-left:10px;"></span> вода
+                <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#64748b;margin-left:10px;"></span> корабль
+                <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#1e293b;margin-left:10px;"></span> мимо
+                <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#ef4444;margin-left:10px;"></span> попадание
+            </div>
             <div class="daria-games-input">
                 <input id="daria-game-input" type="text" placeholder="Подсказка или ход (например: B7)" onkeypress="if(event.key==='Enter')sendDariaGameMessage()">
                 <button onclick="sendDariaGameMessage()">Отправить</button>
@@ -258,24 +325,71 @@
     </template>
 
     <template id="player-content">
-        <div class="player-container">
-            <div class="player-cover">🎵</div>
-            <div class="player-title">Нет трека</div>
-            <div class="player-artist">Загрузи музыку</div>
-            <div class="player-progress"><div id="player-progress"></div></div>
-            <div class="player-time"><span id="player-current">0:00</span> / <span id="player-duration">0:00</span></div>
-            <div class="player-controls">
-                <button onclick="playerPrev()">⏮</button>
-                <button onclick="playerPlay()" id="player-play-btn">▶</button>
-                <button onclick="playerNext()">⏭</button>
+        <div class="player-layout">
+            <div class="player-left">
+                <div class="player-cover-wrap">
+                    <img id="player-cover-img" class="player-cover-img" src="/static/favicon.svg" alt="cover">
+                </div>
+                <div class="player-title">Нет трека</div>
+                <div class="player-artist">Добавь источник справа</div>
+                <div class="player-progress" onclick="playerSeek(event)"><div id="player-progress"></div></div>
+                <div class="player-time"><span id="player-current">0:00</span> / <span id="player-duration">0:00</span></div>
+                <div class="player-controls">
+                    <button onclick="playerPrev()">⏮</button>
+                    <button onclick="playerPlay()" id="player-play-btn">▶</button>
+                    <button onclick="playerNext()">⏭</button>
+                </div>
+                <input type="range" class="volume-slider" value="80" onchange="playerVolume(this.value)">
             </div>
-            <input type="range" class="volume-slider" value="80" onchange="playerVolume(this.value)">
-            <div class="setting-row" style="width:100%;">
-                <input type="text" id="music-title-input" placeholder="Название трека или ссылка (YTM/YouTube)">
-                <button onclick="dashaListenTrack()">Даша слушает</button>
+            <div class="player-right">
+                <div class="setting-row" style="width:100%;">
+                    <input type="text" id="music-title-input" placeholder="Ссылка/запрос (archive, mp3, YouTube, Spotify)">
+                    <button onclick="playerAddSource()">Добавить</button>
+                </div>
+                <div class="setting-row" style="width:100%;">
+                    <button onclick="dashaListenTrack()">Даша слушает текущее</button>
+                    <label class="upload-btn">Локальный файл<input type="file" accept="audio/*" onchange="playerLoad(this.files)" hidden></label>
+                </div>
+                <div class="player-queue-head">Очередь</div>
+                <div id="player-queue" class="player-queue"><div class="empty">Очередь пуста</div></div>
             </div>
-            <label class="upload-btn">🎵 Выбрать<input type="file" accept="audio/*" onchange="playerLoad(this.files)" hidden></label>
             <audio id="player-audio"></audio>
+        </div>
+    </template>
+
+    <template id="diary-content">
+        <div class="diary-book-app">
+            <div class="diary-book-cover">
+                <h3>📝 Личный дневник Даши</h3>
+                <p>Дневник ведёт только Даша. Для пользователя доступен режим чтения.</p>
+            </div>
+            <div class="diary-toolbar">
+                <span id="diary-current-file" class="diary-file-label">Книга: загрузка...</span>
+                <button onclick="loadDiaryEntries()">Обновить</button>
+                <button onclick="openDiaryFileInFiles()">Открыть в Файлах</button>
+            </div>
+            <div id="diary-entries" class="diary-book-view">
+                <div class="empty">Загрузка дневника...</div>
+            </div>
+        </div>
+    </template>
+
+    <template id="knowledge-content">
+        <div class="settings-container">
+            <div class="settings-section">
+                <h3>📖 Knowledge Inspector</h3>
+                <div class="setting-row">
+                    <input id="knowledge-query" type="text" placeholder="Введите вопрос или тему...">
+                    <button onclick="knowledgeSearch()">Поиск</button>
+                </div>
+                <div class="setting-row">
+                    <button onclick="knowledgeUseInChat()">Отправить в чат</button>
+                    <button onclick="knowledgeSearch()">Обновить</button>
+                </div>
+                <div id="knowledge-results" class="knowledge-results">
+                    <div class="empty">Введите запрос для поиска по базе знаний</div>
+                </div>
+            </div>
         </div>
     </template>
 
@@ -306,11 +420,19 @@
                 <h3>🎨 Тема</h3>
                 <div class="setting-row"><label>Тема</label><select id="setting-theme" onchange="applyTheme(this.value)"><option value="pink">Розовая</option><option value="dark">Тёмная</option><option value="blue">Голубая</option></select></div>
                 <div class="setting-row"><label>Обои</label><label class="upload-btn small">Выбрать<input type="file" accept="image/*" onchange="uploadWallpaper(this.files[0])" hidden></label></div>
+                <div class="setting-row"><label>Готовые обои</label><select id="setting-wallpaper-builtin"></select><button onclick="applyBuiltinWallpaper()">Применить</button></div>
+                <div class="setting-row"><label>Новые обои</label><input id="setting-wallpaper-prompt" type="text" placeholder="например: нежный вечерний город"><button onclick="generateWallpaper()">Создать</button></div>
+                <div class="setting-row"><label>Пак иконок</label><select id="setting-icon-pack"><option value="default">Стандарт</option><option value="soft">Soft</option><option value="line">Line</option><option value="bootstrap">Bootstrap Icons</option></select></div>
+                <div class="setting-row"><label>Автосмена обоев</label><input type="checkbox" id="setting-auto-wallpaper"></div>
             </div>
             <div class="settings-section">
                 <h3>🤖 Дарья</h3>
                 <div class="setting-row"><label>Режим</label><select id="setting-mode"><option value="adaptive">Адаптивный</option><option value="companion">Подруга</option><option value="assistant">Помощник</option></select></div>
+                <div class="setting-row"><label>Режим дня</label><select id="setting-day-routine"><option value="realistic">Обычный</option><option value="early_bird">Жаворонок</option><option value="night_owl">Сова</option></select></div>
                 <div class="setting-row"><label>Внимание</label><input type="checkbox" id="setting-attention" checked></div>
+                <div class="setting-row"><label>Свободные темы</label><input type="checkbox" id="setting-unrestricted-topics"></div>
+                <div class="setting-row"><label>Зрение (сенсоры)</label><select id="setting-vision-provider"><option value="auto">Auto</option><option value="blip2">BLIP-2</option><option value="blip">BLIP</option><option value="basic">Basic</option><option value="classifier">Classifier</option></select></div>
+                <div class="setting-row"><label>Слух (сенсоры)</label><select id="setting-audio-provider"><option value="auto">Auto</option><option value="whisper">Whisper</option><option value="hf_asr">HF ASR</option><option value="google_sr">Google SR</option></select></div>
                 <div class="setting-row"><label>Показывать настроение</label><input type="checkbox" id="setting-show-mood" checked></div>
                 <div class="setting-row"><label>Разум (LLM)</label><span id="llm-status">—</span></div>
             </div>

@@ -1,0 +1,4 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1920 1080'>
+<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0%' stop-color='#1e293b'/><stop offset='100%' stop-color='#f472b6'/></linearGradient></defs>
+<rect width='1920' height='1080' fill='url(#g)'/><circle cx='380' cy='260' r='260' fill='#f9a8d4' fill-opacity='.28'/><circle cx='1480' cy='860' r='340' fill='#93c5fd' fill-opacity='.22'/>
+</svg>
